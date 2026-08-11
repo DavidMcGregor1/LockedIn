@@ -1,0 +1,3 @@
+siteenvironment.donotcommit
+sensitive.*.donotcommit
+sqlinfo.donotcommit

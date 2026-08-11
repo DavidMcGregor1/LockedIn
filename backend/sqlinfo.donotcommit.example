@@ -1,0 +1,8 @@
+{
+  "MYSQL_HOST": "MYSQL8001.site4now.net",
+  "MYSQL_PORT": "3306",
+  "MYSQL_DATABASE": "db_a4b54e_locked",
+  "MYSQL_USERNAME": "a4b54e_locked",
+  "MYSQL_PASSWORD": "REPLACE_WITH_PASSWORD",
+  "MYSQL_SSLMODE": "Preferred"
+}

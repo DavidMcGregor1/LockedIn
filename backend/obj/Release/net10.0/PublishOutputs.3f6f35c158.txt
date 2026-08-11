@@ -1,0 +1,9 @@
+C:\dev\lockedin-backend-published\backend.exe
+C:\dev\lockedin-backend-published\appsettings.Development.json
+C:\dev\lockedin-backend-published\appsettings.json
+C:\dev\lockedin-backend-published\backend.dll
+C:\dev\lockedin-backend-published\backend.deps.json
+C:\dev\lockedin-backend-published\backend.runtimeconfig.json
+C:\dev\lockedin-backend-published\backend.pdb
+C:\dev\lockedin-backend-published\Microsoft.AspNetCore.OpenApi.dll
+C:\dev\lockedin-backend-published\Microsoft.OpenApi.dll
