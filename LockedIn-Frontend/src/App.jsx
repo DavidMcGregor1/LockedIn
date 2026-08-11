@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import './App.css'
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '')
+
 const metricDefinitions = [
   {
     key: 'waterLiters',
@@ -89,7 +91,8 @@ const exerciseOptions = [
 ]
 
 async function requestJson(url, options) {
-  const response = await fetch(url, options)
+  const requestUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`
+  const response = await fetch(requestUrl, options)
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`)
   }
