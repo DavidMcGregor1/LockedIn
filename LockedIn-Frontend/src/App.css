@@ -102,6 +102,40 @@
   font-weight: 700;
 }
 
+.legal-links {
+  margin-top: 6px;
+}
+
+.public-page {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.public-page h2 {
+  margin: 0;
+  color: #eff4ff;
+  font-size: 1.5rem;
+}
+
+.public-page p {
+  margin: 0;
+  color: #b8c5da;
+  line-height: 1.45;
+}
+
+.public-page a {
+  color: #62e47f;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.public-page-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .today-page {
   display: flex;
   flex-direction: column;

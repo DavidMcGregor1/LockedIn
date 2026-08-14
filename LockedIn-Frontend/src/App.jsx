@@ -350,6 +350,8 @@ function App() {
               isAuthenticated ? <Navigate to="/today" replace /> : <SignupPage onSuccess={markAuthenticated} />
             }
           />
+          <Route path="/support" element={<SupportPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
           <Route
             path="/today"
             element={
@@ -497,6 +499,9 @@ function LoginPage({ onSuccess }) {
       <p className="auth-switch-text">
         Don&apos;t have an account? <Link to="/signup">Sign up</Link>
       </p>
+      <p className="auth-switch-text legal-links">
+        <Link to="/support">Support</Link> · <Link to="/privacy">Privacy</Link>
+      </p>
     </section>
   )
 }
@@ -583,6 +588,40 @@ function SignupPage({ onSuccess }) {
       </form>
       <p className="auth-switch-text">
         Already have an account? <Link to="/login">Log in</Link>
+      </p>
+      <p className="auth-switch-text legal-links">
+        <Link to="/support">Support</Link> · <Link to="/privacy">Privacy</Link>
+      </p>
+    </section>
+  )
+}
+
+function SupportPage() {
+  return (
+    <section className="public-page page-card">
+      <h2>Support</h2>
+      <p>If you need help with Locked In, email <a href="mailto:support@lockedin.app">support@lockedin.app</a>.</p>
+      <p>We aim to respond within 2 business days.</p>
+      <p className="public-page-links">
+        <Link to="/privacy">Privacy Policy</Link>
+        <span>·</span>
+        <Link to="/login">Back to login</Link>
+      </p>
+    </section>
+  )
+}
+
+function PrivacyPage() {
+  return (
+    <section className="public-page page-card">
+      <h2>Privacy Policy</h2>
+      <p>Locked In stores account details, goals, room membership, and habit entries so the app can function.</p>
+      <p>We do not sell your personal data. Data is only used to provide app features and support.</p>
+      <p>To request data deletion or ask privacy questions, contact <a href="mailto:privacy@lockedin.app">privacy@lockedin.app</a>.</p>
+      <p className="public-page-links">
+        <Link to="/support">Support</Link>
+        <span>·</span>
+        <Link to="/login">Back to login</Link>
       </p>
     </section>
   )
