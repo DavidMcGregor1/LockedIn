@@ -24,6 +24,13 @@ body,
   height: 100%;
   overflow: hidden;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.content > * {
+  flex: 1;
+  min-height: 0;
 }
 
 .auth-page {
@@ -1060,6 +1067,7 @@ body,
 .compare-page {
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-height: calc(100svh - 170px);
   justify-content: space-between;
   gap: 10px;
@@ -1489,6 +1497,7 @@ body,
 .profile-page {
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-height: calc(100svh - 170px);
   gap: 8px;
   padding-top: calc(env(safe-area-inset-top) + 48px);
