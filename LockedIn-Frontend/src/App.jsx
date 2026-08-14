@@ -1444,12 +1444,37 @@ function ComparePage({ users, activeUserId }) {
         calibrationDaysCompleted: 0,
         calibrationDaysRequired: 7,
       }
+      const activePeriodScores = periods
+        .map((period) => {
+          const metricValues = selectedMetricKeys.map((metricKey) => {
+            const metricRows = compareByMetric[metricKey] ?? []
+            const row = metricRows.find((item) => item.period === period)
+            return Number(row?.[user.name] ?? 0)
+          })
+          const hasAnyTrackedValue = metricValues.some((value) => value > 0)
+          if (!hasAnyTrackedValue) {
+            return null
+          }
+
+          const periodScores = metricValues.map((value, index) => {
+            const metricKey = selectedMetricKeys[index]
+            const definition = metricDefinitionByKey[metricKey]
+            const goalValue = Number(userGoalsById?.[user.id]?.[definition.key] ?? definition.goalValue)
+            return getMetricProgress(definition, value, goalValue)
+          })
+          return Math.round(average(periodScores))
+        })
+        .filter((score) => score !== null)
+      const fallbackScore = activePeriodScores.length > 0
+        ? Math.round(average(activePeriodScores))
+        : null
+      const averageScore = scoreInfo.averageScore ?? fallbackScore
 
       return {
         ...user,
-        averageScore: scoreInfo.isScoreCalibrated ? scoreInfo.averageScore : null,
+        averageScore,
         isScoreCalibrated: scoreInfo.isScoreCalibrated,
-        calibrationDaysCompleted: scoreInfo.calibrationDaysCompleted,
+        calibrationDaysCompleted: Math.max(scoreInfo.calibrationDaysCompleted, activePeriodScores.length),
         calibrationDaysRequired: scoreInfo.calibrationDaysRequired,
       }
     })
