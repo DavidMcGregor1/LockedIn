@@ -1776,18 +1776,6 @@ function AccountPage({ activeUser, goals, onManageGoals, onSignOut }) {
     month: 'short',
     year: 'numeric',
   }).format(new Date(activeUser.joinDate))
-  const daysCompleted = activeUser.streakDays + 11
-  const averageScore = Math.min(99, 60 + activeUser.streakDays)
-  const bestStreak = activeUser.streakDays + 2
-  const perfectDays = Math.max(1, Math.round(daysCompleted * 0.2))
-  const completionRate = Math.min(99, Math.round((daysCompleted / (daysCompleted + 3)) * 100))
-  const profileStats = [
-    { key: 'days', icon: '✓', value: daysCompleted, label: 'Days completed', color: '#62e47f' },
-    { key: 'score', icon: '✶', value: averageScore, label: 'Avg. score', color: '#a65bff' },
-    { key: 'streak', icon: '🏆', value: bestStreak, label: 'Best streak', color: '#f0a63c' },
-    { key: 'perfect', icon: '◎', value: perfectDays, label: 'Perfect days', color: '#2c8bff' },
-    { key: 'rate', icon: '↗', value: `${completionRate}%`, label: 'Completion rate', color: '#62e47f' },
-  ]
 
   async function submitRoomCode(event) {
     event.preventDefault()
@@ -1857,26 +1845,6 @@ function AccountPage({ activeUser, goals, onManageGoals, onSignOut }) {
             </button>
           </div>
         </div>
-
-        <div className="profile-stats-grid">
-          {profileStats.map((stat) => (
-            <article key={stat.key} className="profile-stat-item">
-              <span className="profile-stat-icon" style={{ color: stat.color }}>
-                {stat.icon}
-              </span>
-              <strong>{stat.value}</strong>
-              <p>{stat.label}</p>
-            </article>
-          ))}
-        </div>
-      </article>
-
-      <article className="profile-about-card">
-        <div className="profile-card-title-row">
-          <h3>About Me</h3>
-          <span>✎</span>
-        </div>
-        <p>Building better habits. One day at a time.</p>
       </article>
 
       <article className="profile-goals-card">
@@ -1964,6 +1932,10 @@ function AccountPage({ activeUser, goals, onManageGoals, onSignOut }) {
             </button>
           </p>
         )}
+        <div className="profile-link-buttons">
+          <Link to="/support" className="profile-link-btn">Support</Link>
+          <Link to="/privacy" className="profile-link-btn">Privacy</Link>
+        </div>
       </article>
     </section>
   )

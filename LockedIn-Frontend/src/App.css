@@ -1487,7 +1487,6 @@
 }
 
 .profile-hero-card,
-.profile-about-card,
 .profile-goals-card,
 .profile-room-card {
   border: 1px solid #243146;
@@ -1575,45 +1574,6 @@
   padding: 7px 10px;
 }
 
-.profile-stats-grid {
-  margin-top: 10px;
-  border: 1px solid #223043;
-  border-radius: 10px;
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  overflow: hidden;
-}
-
-.profile-stat-item {
-  padding: 9px 4px;
-  text-align: center;
-}
-
-.profile-stat-item + .profile-stat-item {
-  border-left: 1px solid #1f2a3d;
-}
-
-.profile-stat-icon {
-  display: block;
-  font-size: 0.9rem;
-  line-height: 1;
-}
-
-.profile-stat-item strong {
-  display: block;
-  margin-top: 4px;
-  color: #f0f5ff;
-  font-size: 1.4rem;
-  line-height: 1.1;
-}
-
-.profile-stat-item p {
-  margin: 2px 0 0;
-  color: #93a0b5;
-  font-size: 0.67rem;
-}
-
-.profile-about-card,
 .profile-goals-card,
 .profile-room-card {
   padding: 10px;
@@ -1635,12 +1595,6 @@
 .profile-card-title-row span {
   color: #8f9db3;
   font-size: 0.88rem;
-}
-
-.profile-about-card p {
-  margin: 8px 0 0;
-  color: #96a4ba;
-  font-size: 0.8rem;
 }
 
 .profile-manage-btn {
@@ -1793,4 +1747,23 @@
   font-size: 0.8rem;
   cursor: pointer;
   padding: 0;
+}
+
+.profile-link-buttons {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.profile-link-btn {
+  flex: 1;
+  border: 1px solid #2a364c;
+  border-radius: 8px;
+  background: rgba(16, 24, 38, 0.9);
+  color: #d6deee;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+  padding: 8px 10px;
 }
