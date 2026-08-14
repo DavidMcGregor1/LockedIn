@@ -1064,7 +1064,11 @@ body,
   justify-content: space-between;
   gap: 10px;
   padding-top: calc(env(safe-area-inset-top) + 48px);
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
 }
 
 .compare-header {
@@ -1488,7 +1492,11 @@ body,
   min-height: calc(100svh - 170px);
   gap: 8px;
   padding-top: calc(env(safe-area-inset-top) + 48px);
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
 }
 
 .profile-page-header h2 {

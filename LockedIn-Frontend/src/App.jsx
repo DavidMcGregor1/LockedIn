@@ -1161,7 +1161,10 @@ function DashboardPage({ activeUserId, activeUser }) {
 
   const summary = dashboard?.summary ?? {
     daysCompleted: 0,
-    averageScore: 0,
+    averageScore: null,
+    isScoreCalibrated: false,
+    calibrationDaysRequired: 7,
+    calibrationDaysCompleted: 0,
     bestStreak: activeUser?.streakDays ?? 0,
   }
   const streakDays = activeUser?.streakDays ?? 0
@@ -1214,8 +1217,14 @@ function DashboardPage({ activeUserId, activeUser }) {
           <div className="dashboard-summary-icon score">
             <DashboardSummaryIcon type="averageScore" />
           </div>
-          <strong>{summary.averageScore}</strong>
-          <span>Avg. score</span>
+          <strong>{summary.averageScore ?? '--'}</strong>
+          <span>
+            {summary.isScoreCalibrated
+              ? 'Avg. score'
+              : summary.averageScore === null
+                ? 'Start tracking to calibrate'
+                : `Provisional ${summary.calibrationDaysCompleted}/${summary.calibrationDaysRequired}`}
+          </span>
         </article>
         <article className="dashboard-summary-item">
           <div className="dashboard-summary-icon streak">
@@ -1284,6 +1293,7 @@ function ComparePage({ users, activeUserId }) {
   const [range, setRange] = useState('weekly')
   const [compareByMetric, setCompareByMetric] = useState({})
   const [userGoalsById, setUserGoalsById] = useState({})
+  const [userScoreById, setUserScoreById] = useState({})
   const [isRangeMenuOpen, setIsRangeMenuOpen] = useState(false)
   const rangeMenuRef = useRef(null)
 
@@ -1379,30 +1389,71 @@ function ComparePage({ users, activeUserId }) {
     }
   }, [visibleUsers])
 
+  useEffect(() => {
+    if (visibleUsers.length === 0) {
+      setUserScoreById({})
+      return
+    }
+
+    let cancelled = false
+    Promise.all(
+      visibleUsers.map((user) =>
+        requestJson(`/api/dashboard/${user.id}`)
+          .then((data) => {
+            const summary = data?.summary ?? {}
+            return [
+              user.id,
+              {
+                averageScore: summary.averageScore === null || summary.averageScore === undefined
+                  ? null
+                  : Number(summary.averageScore),
+                isScoreCalibrated: Boolean(summary.isScoreCalibrated),
+                calibrationDaysCompleted: Number(summary.calibrationDaysCompleted ?? 0),
+                calibrationDaysRequired: Number(summary.calibrationDaysRequired ?? 7),
+              },
+            ]
+          })
+          .catch(() => [
+            user.id,
+            {
+              averageScore: null,
+              isScoreCalibrated: false,
+              calibrationDaysCompleted: 0,
+              calibrationDaysRequired: 7,
+            },
+          ]),
+      ),
+    ).then((entries) => {
+      if (cancelled) {
+        return
+      }
+
+      setUserScoreById(Object.fromEntries(entries))
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [visibleUsers])
+
   const rankedUsers = usersByName
     .map((user) => {
-      const dailyScores = periods.map((period) => {
-        const periodScores = selectedMetricKeys.map((metricKey) => {
-          const metricRows = compareByMetric[metricKey] ?? []
-          const row = metricRows.find((item) => item.period === period)
-          const value = Number(row?.[user.name] ?? 0)
-          const definition = metricDefinitionByKey[metricKey]
-          return getMetricScore(definition, value)
-        })
-
-        return average(periodScores)
-      })
-
-      const averageScore = Math.round(average(dailyScores))
-      const completedPeriods = dailyScores.filter((score) => score >= 60).length
+      const scoreInfo = userScoreById[user.id] ?? {
+        averageScore: null,
+        isScoreCalibrated: false,
+        calibrationDaysCompleted: 0,
+        calibrationDaysRequired: 7,
+      }
 
       return {
         ...user,
-        averageScore,
-        completedPeriods,
+        averageScore: scoreInfo.isScoreCalibrated ? scoreInfo.averageScore : null,
+        isScoreCalibrated: scoreInfo.isScoreCalibrated,
+        calibrationDaysCompleted: scoreInfo.calibrationDaysCompleted,
+        calibrationDaysRequired: scoreInfo.calibrationDaysRequired,
       }
     })
-    .sort((left, right) => right.averageScore - left.averageScore)
+    .sort((left, right) => (right.averageScore ?? -1) - (left.averageScore ?? -1))
 
   const topUsers = rankedUsers.slice(0, 2)
 
@@ -1455,16 +1506,20 @@ function ComparePage({ users, activeUserId }) {
                 {user.name[0]}
               </div>
               <h3>{user.name}</h3>
-              <strong>{user.averageScore}</strong>
+              <strong>{user.averageScore ?? '--'}</strong>
               <p className="compare-rank-label">Avg. Lock In Score</p>
               <div className="compare-rank-progress-track">
                 <div
                   className="compare-rank-progress-fill"
-                  style={{ width: `${Math.min(100, user.averageScore)}%` }}
+                  style={{ width: `${Math.min(100, user.averageScore ?? 0)}%` }}
                 />
               </div>
               <p className="compare-rank-sub">
-                {user.completedPeriods} of {periodCount} {periodLabel}
+                {user.isScoreCalibrated
+                  ? 'Calibrated from your last 7 tracked days'
+                  : user.averageScore === null
+                    ? 'Start tracking to begin calibration'
+                    : `Provisional ${user.calibrationDaysCompleted}/${user.calibrationDaysRequired} days`}
               </p>
             </article>
           ))}
