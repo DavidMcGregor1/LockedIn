@@ -4,5 +4,6 @@
   "MYSQL_DATABASE": "db_a4b54e_locked",
   "MYSQL_USERNAME": "a4b54e_locked",
   "MYSQL_PASSWORD": "REPLACE_WITH_PASSWORD",
-  "MYSQL_SSLMODE": "Preferred"
+  "MYSQL_SSLMODE": "Preferred",
+  "CORS_ORIGINS": "https://lockedin-68fm.onrender.com"
 }

@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Link, NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import './App.css'
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '')
+const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/$/, '')
+const API_BASE_URL = import.meta.env.DEV ? '' : configuredApiBaseUrl
 
 const metricDefinitions = [
   {
     key: 'waterLiters',
     label: 'Water',
-    goalLabel: 'Goal: 3 L',
-    goalValue: 3,
+    goalLabel: 'Goal: 2 L',
+    goalValue: 2,
     increment: 0.1,
     color: '#4f6fe8',
     unitLabel: 'L',
@@ -56,13 +57,13 @@ const metricDefinitions = [
   {
     key: 'moneySpent',
     label: 'Money Spent',
-    goalLabel: 'Goal: under $50',
-    goalValue: 50,
+    goalLabel: 'Goal: under £20',
+    goalValue: 20,
     increment: 1,
     color: '#f06f36',
     unitLabel: '',
-    displayValue: (value) => `$${value.toFixed(0)}`,
-    formatValue: (value) => `$${value.toFixed(2)}`,
+    displayValue: (value) => `£${value.toFixed(0)}`,
+    formatValue: (value) => `£${value.toFixed(2)}`,
     progressText: (value, goalValue) => (value <= goalValue ? 'On track' : 'Over goal'),
   },
 ]
@@ -77,6 +78,9 @@ const defaultTodayForm = {
   steps: 0,
   moneySpent: 0,
 }
+const defaultGoalValues = Object.fromEntries(
+  metricDefinitions.map((definition) => [definition.key, definition.goalValue]),
+)
 
 const exerciseOptions = [
   { id: 'gym', label: 'Gym', icon: '🏋️' },
@@ -103,32 +107,231 @@ function getTodayIsoDate() {
   return new Date().toISOString().slice(0, 10)
 }
 
+function getCompletionStorageKey(userId, dateIso) {
+  return `lockedin-completed-${userId}-${dateIso}`
+}
+
+function normalizeGoalValues(goalValues) {
+  const normalized = { ...defaultGoalValues }
+  for (const definition of metricDefinitions) {
+    const rawValue = Number(goalValues?.[definition.key])
+    normalized[definition.key] = Number.isFinite(rawValue) && rawValue > 0
+      ? rawValue
+      : definition.goalValue
+  }
+
+  return normalized
+}
+
+function parseMetricInput(definition, inputValue) {
+  const cleaned = String(inputValue ?? '').replace(/[^\d.]/g, '')
+  if (!cleaned) {
+    return 0
+  }
+
+  const parsed = Number(cleaned)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0
+  }
+
+  if (definition.increment >= 1) {
+    return Math.round(parsed)
+  }
+
+  return Math.round(parsed * 10) / 10
+}
+
 function App() {
+  const location = useLocation()
   const [users, setUsers] = useState([])
-  const [activeUserId, setActiveUserId] = useState('')
+  const [activeUserId, setActiveUserId] = useState(
+    () => {
+      const savedUserId = localStorage.getItem('lockedin-user-id') ?? ''
+      return /^\d+$/.test(savedUserId) ? savedUserId : ''
+    },
+  )
   const [isAuthenticated, setIsAuthenticated] = useState(
     () => localStorage.getItem('lockedin-auth') === '1',
   )
+  const [userGoals, setUserGoals] = useState(defaultGoalValues)
+  const [hasUserGoals, setHasUserGoals] = useState(false)
+  const [isGoalsLoading, setIsGoalsLoading] = useState(false)
+  const [goalsLoadedUserId, setGoalsLoadedUserId] = useState('')
+  const [isGoalsModalOpen, setIsGoalsModalOpen] = useState(false)
+  const [isGoalsRequired, setIsGoalsRequired] = useState(false)
+  const [isSavingGoals, setIsSavingGoals] = useState(false)
+  const [goalsError, setGoalsError] = useState('')
+
+  function clearAuthSession() {
+    localStorage.removeItem('lockedin-auth')
+    localStorage.removeItem('lockedin-user-id')
+    setIsAuthenticated(false)
+    setUsers([])
+    setActiveUserId('')
+    setUserGoals(defaultGoalValues)
+    setHasUserGoals(false)
+    setGoalsLoadedUserId('')
+    setIsGoalsModalOpen(false)
+    setIsGoalsRequired(false)
+    setGoalsError('')
+  }
+
+  function syncUsers(data) {
+    if (!Array.isArray(data) || data.length === 0) {
+      return false
+    }
+
+    setUsers(data)
+    const savedUserId = localStorage.getItem('lockedin-user-id')
+    const selectedUser =
+      data.find((user) => user.id === savedUserId) ??
+      data.find((user) => user.id === activeUserId) ??
+      data[0]
+
+    if (!selectedUser) {
+      return false
+    }
+
+    setActiveUserId(selectedUser.id)
+    localStorage.setItem('lockedin-user-id', selectedUser.id)
+    return true
+  }
 
   useEffect(() => {
-    requestJson('/api/users')
-      .then((data) => {
-        setUsers(data)
-        if (data.length > 0) {
-          setActiveUserId(data[0].id)
-        }
-      })
-      .catch(() => setUsers([]))
-  }, [])
+    if (!isAuthenticated) {
+      setUsers([])
+      setActiveUserId('')
+      setUserGoals(defaultGoalValues)
+      setHasUserGoals(false)
+      setGoalsLoadedUserId('')
+      setIsGoalsModalOpen(false)
+      setIsGoalsRequired(false)
+      setGoalsError('')
+      return
+    }
+
+    let cancelled = false
+
+    function refreshUsers(hardFail = false) {
+      requestJson('/api/users')
+        .then((data) => {
+          if (cancelled) {
+            return
+          }
+
+          const synced = syncUsers(data)
+          if (!synced && hardFail) {
+            clearAuthSession()
+          }
+        })
+        .catch(() => {
+          if (cancelled || !hardFail) {
+            return
+          }
+
+          clearAuthSession()
+        })
+    }
+
+    refreshUsers(true)
+
+    const refreshIntervalId = setInterval(() => refreshUsers(false), 15000)
+    const handleWindowFocus = () => refreshUsers(false)
+    window.addEventListener('focus', handleWindowFocus)
+
+    return () => {
+      cancelled = true
+      clearInterval(refreshIntervalId)
+      window.removeEventListener('focus', handleWindowFocus)
+    }
+  }, [activeUserId, isAuthenticated])
 
   const activeUser = useMemo(
     () => users.find((user) => user.id === activeUserId),
     [activeUserId, users],
   )
 
-  function markAuthenticated() {
+  useEffect(() => {
+    if (!isAuthenticated || !activeUserId) {
+      setUserGoals(defaultGoalValues)
+      setHasUserGoals(false)
+      setIsGoalsLoading(false)
+      setGoalsLoadedUserId('')
+      return
+    }
+
+    setIsGoalsLoading(true)
+    setGoalsLoadedUserId('')
+    requestJson(`/api/users/${activeUserId}/goals`)
+      .then((data) => {
+        if (!data) {
+          setUserGoals(defaultGoalValues)
+          setHasUserGoals(false)
+          return
+        }
+
+        setUserGoals(normalizeGoalValues(data))
+        setHasUserGoals(true)
+      })
+      .catch(() => {
+        setUserGoals(defaultGoalValues)
+        setHasUserGoals(false)
+      })
+      .finally(() => {
+        setIsGoalsLoading(false)
+        setGoalsLoadedUserId(activeUserId)
+      })
+  }, [activeUserId, isAuthenticated])
+
+  useEffect(() => {
+    if (!isAuthenticated ||
+      !activeUserId ||
+      isGoalsLoading ||
+      hasUserGoals ||
+      goalsLoadedUserId !== activeUserId ||
+      location.pathname !== '/today') {
+      return
+    }
+
+    setGoalsError('')
+    setIsGoalsRequired(true)
+    setIsGoalsModalOpen(true)
+  }, [activeUserId, goalsLoadedUserId, hasUserGoals, isAuthenticated, isGoalsLoading, location.pathname])
+
+  function markAuthenticated(user) {
     localStorage.setItem('lockedin-auth', '1')
+    localStorage.setItem('lockedin-user-id', user.id)
+    setActiveUserId(user.id)
     setIsAuthenticated(true)
+  }
+
+  async function saveGoals(goalValues) {
+    if (!activeUserId) {
+      return false
+    }
+
+    setIsSavingGoals(true)
+    setGoalsError('')
+    try {
+      const payload = normalizeGoalValues(goalValues)
+      const savedGoals = await requestJson(`/api/users/${activeUserId}/goals`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      setUserGoals(normalizeGoalValues(savedGoals ?? payload))
+      setHasUserGoals(true)
+      setGoalsLoadedUserId(activeUserId)
+      setIsGoalsRequired(false)
+      setIsGoalsModalOpen(false)
+      return true
+    } catch {
+      setGoalsError('Could not save goals right now. Please try again.')
+      return false
+    } finally {
+      setIsSavingGoals(false)
+    }
   }
 
   return (
@@ -151,7 +354,7 @@ function App() {
             path="/today"
             element={
               isAuthenticated
-                ? <TodayPage activeUserId={activeUserId} activeUser={activeUser} />
+                ? <TodayPage activeUserId={activeUserId} activeUser={activeUser} goals={userGoals} />
                 : <Navigate to="/login" replace />
             }
           />
@@ -166,35 +369,65 @@ function App() {
           <Route
             path="/compare"
             element={
-              isAuthenticated ? <ComparePage users={users} /> : <Navigate to="/login" replace />
+              isAuthenticated ? <ComparePage users={users} activeUserId={activeUserId} /> : <Navigate to="/login" replace />
             }
           />
           <Route
             path="/account"
             element={
-              isAuthenticated ? <AccountPage activeUser={activeUser} /> : <Navigate to="/login" replace />
+              isAuthenticated
+                ? (
+                    <AccountPage
+                      activeUser={activeUser}
+                      goals={userGoals}
+                      onSignOut={clearAuthSession}
+                      onManageGoals={() => {
+                        setGoalsError('')
+                        setIsGoalsRequired(false)
+                        setIsGoalsModalOpen(true)
+                      }}
+                    />
+                  )
+                : <Navigate to="/login" replace />
             }
           />
           <Route path="*" element={<Navigate to={isAuthenticated ? '/today' : '/login'} replace />} />
         </Routes>
       </main>
 
+      {isAuthenticated && isGoalsModalOpen && (
+        <GoalSettingsModal
+          initialGoals={userGoals}
+          isRequired={isGoalsRequired}
+          isSaving={isSavingGoals}
+          error={goalsError}
+          onClose={() => {
+            if (isGoalsRequired) {
+              return
+            }
+
+            setIsGoalsModalOpen(false)
+          }}
+          onSave={saveGoals}
+        />
+      )}
+
       {isAuthenticated && (
         <nav className="bottom-nav">
           <NavLink to="/today">
-            <span className="nav-icon">☀</span>
+            <span className="nav-icon"><BottomNavIcon type="today" /></span>
             <span>Today</span>
           </NavLink>
           <NavLink to="/dashboard">
-            <span className="nav-icon">▥</span>
+            <span className="nav-icon"><BottomNavIcon type="dashboard" /></span>
             <span>Dashboard</span>
           </NavLink>
           <NavLink to="/compare">
-            <span className="nav-icon">◌◌</span>
+            <span className="nav-icon"><BottomNavIcon type="compare" /></span>
             <span>Compare</span>
           </NavLink>
           <NavLink to="/account">
-            <span className="nav-icon">◯</span>
+            <span className="nav-icon"><BottomNavIcon type="profile" /></span>
             <span>Profile</span>
           </NavLink>
         </nav>
@@ -204,14 +437,30 @@ function App() {
 }
 
 function LoginPage({ onSuccess }) {
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const navigate = useNavigate()
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault()
-    onSuccess()
-    navigate('/today', { replace: true })
+    setError('')
+    setIsSubmitting(true)
+
+    try {
+      const user = await requestJson('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.trim(), password }),
+      })
+      onSuccess(user)
+      navigate('/today', { replace: true })
+    } catch {
+      setError('Invalid username or password.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -222,26 +471,26 @@ function LoginPage({ onSuccess }) {
       </header>
       <form className="auth-card" onSubmit={handleSubmit}>
         <label className="auth-field">
-          <span>Email</span>
+          <span>Username</span>
           <input
-            type="email"
+            type="text"
             required
-            placeholder="you@example.com"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            placeholder="your_username"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
           />
         </label>
         <label className="auth-field">
           <span>Password</span>
           <input
             type="password"
-            required
             placeholder="••••••••"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />
         </label>
-        <button type="submit" className="auth-submit-btn">
+        {error && <p className="auth-error-text">{error}</p>}
+        <button type="submit" className="auth-submit-btn" disabled={isSubmitting}>
           Log In
         </button>
       </form>
@@ -254,14 +503,41 @@ function LoginPage({ onSuccess }) {
 
 function SignupPage({ onSuccess }) {
   const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const navigate = useNavigate()
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault()
-    onSuccess()
-    navigate('/today', { replace: true })
+    setError('')
+    setIsSubmitting(true)
+
+    try {
+      const user = await requestJson('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: username.trim(),
+          password,
+          displayName: name.trim(),
+        }),
+      })
+      onSuccess(user)
+      navigate('/today', { replace: true })
+    } catch (errorToHandle) {
+      setError(
+        errorToHandle instanceof Error && errorToHandle.message.includes('Username must be between 1 and 50 characters')
+          ? 'Username must be between 1 and 50 characters.'
+          :
+        errorToHandle instanceof Error && errorToHandle.message.includes('409')
+          ? 'Username already taken.'
+          : 'Could not create account.',
+      )
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -282,26 +558,26 @@ function SignupPage({ onSuccess }) {
           />
         </label>
         <label className="auth-field">
-          <span>Email</span>
+          <span>Username</span>
           <input
-            type="email"
+            type="text"
             required
-            placeholder="you@example.com"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            placeholder="your_username"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
           />
         </label>
         <label className="auth-field">
           <span>Password</span>
           <input
             type="password"
-            required
             placeholder="Create a password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />
         </label>
-        <button type="submit" className="auth-submit-btn">
+        {error && <p className="auth-error-text">{error}</p>}
+        <button type="submit" className="auth-submit-btn" disabled={isSubmitting}>
           Sign Up
         </button>
       </form>
@@ -312,23 +588,61 @@ function SignupPage({ onSuccess }) {
   )
 }
 
-function TodayPage({ activeUserId, activeUser }) {
+function TodayPage({ activeUserId, activeUser, goals }) {
   const [form, setForm] = useState(defaultTodayForm)
   const [selectedExercises, setSelectedExercises] = useState([])
   const [isExerciseSheetOpen, setIsExerciseSheetOpen] = useState(false)
   const [draftExercises, setDraftExercises] = useState([])
-  const [showDaySavedPopup, setShowDaySavedPopup] = useState(false)
+  const [isDayCompleted, setIsDayCompleted] = useState(false)
+  const [hasLoadedTodayState, setHasLoadedTodayState] = useState(false)
 
   const liveStorageKey = useMemo(
     () => (activeUserId ? `lockedin-live-${activeUserId}` : ''),
     [activeUserId],
   )
 
-  useEffect(() => {
+  function persistLiveDay(nextForm, nextSelectedExercises) {
     if (!activeUserId || !liveStorageKey) {
       return
     }
 
+    localStorage.setItem(
+      liveStorageKey,
+      JSON.stringify({
+        date: getTodayIsoDate(),
+        form: nextForm,
+        selectedExercises: nextSelectedExercises,
+      }),
+    )
+  }
+
+  function syncLiveDayToApi(nextForm) {
+    if (!activeUserId) {
+      return
+    }
+
+    const payload = {
+      userId: activeUserId,
+      date: getTodayIsoDate(),
+      ...nextForm,
+    }
+
+    requestJson('/api/live-entries', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => {
+      // Keep local save behavior even when API is unavailable.
+    })
+  }
+
+  useEffect(() => {
+    if (!activeUserId || !liveStorageKey) {
+      setHasLoadedTodayState(false)
+      return
+    }
+
+    setHasLoadedTodayState(false)
     const todayIso = getTodayIsoDate()
     const localDay = localStorage.getItem(liveStorageKey)
     if (localDay) {
@@ -339,6 +653,7 @@ function TodayPage({ activeUserId, activeUser }) {
             setForm({ ...defaultTodayForm, ...parsed.form })
           }
           setSelectedExercises(parsed.selectedExercises ?? [])
+          setHasLoadedTodayState(true)
           return
         }
       } catch {
@@ -368,6 +683,7 @@ function TodayPage({ activeUserId, activeUser }) {
             selectedExercises: [],
           }),
         )
+        setHasLoadedTodayState(true)
       })
       .catch(() => {
         setForm(defaultTodayForm)
@@ -380,11 +696,12 @@ function TodayPage({ activeUserId, activeUser }) {
             selectedExercises: [],
           }),
         )
+        setHasLoadedTodayState(true)
       })
   }, [activeUserId, liveStorageKey])
 
   useEffect(() => {
-    if (!activeUserId || !liveStorageKey) {
+    if (!activeUserId || !liveStorageKey || !hasLoadedTodayState) {
       return
     }
 
@@ -396,7 +713,7 @@ function TodayPage({ activeUserId, activeUser }) {
         selectedExercises,
       }),
     )
-  }, [activeUserId, form, selectedExercises, liveStorageKey])
+  }, [activeUserId, form, hasLoadedTodayState, selectedExercises, liveStorageKey])
 
   useEffect(() => {
     if (!activeUserId || !liveStorageKey) {
@@ -416,6 +733,7 @@ function TodayPage({ activeUserId, activeUser }) {
         setSelectedExercises([])
         setDraftExercises([])
         setIsExerciseSheetOpen(false)
+        setIsDayCompleted(false)
         localStorage.setItem(
           liveStorageKey,
           JSON.stringify({
@@ -436,15 +754,6 @@ function TodayPage({ activeUserId, activeUser }) {
       }
     }
   }, [activeUserId, liveStorageKey])
-
-  useEffect(() => {
-    if (!showDaySavedPopup) {
-      return
-    }
-
-    const timeoutId = setTimeout(() => setShowDaySavedPopup(false), 1800)
-    return () => clearTimeout(timeoutId)
-  }, [showDaySavedPopup])
 
   async function completeDay() {
     if (!activeUserId) {
@@ -469,7 +778,7 @@ function TodayPage({ activeUserId, activeUser }) {
     }
 
     localStorage.setItem(
-      `lockedin-completed-${activeUserId}-${todayIso}`,
+      getCompletionStorageKey(activeUserId, todayIso),
       JSON.stringify({
         date: todayIso,
         form,
@@ -478,7 +787,7 @@ function TodayPage({ activeUserId, activeUser }) {
       }),
     )
 
-    setShowDaySavedPopup(true)
+    setIsDayCompleted(true)
   }
 
   useEffect(() => {
@@ -487,8 +796,9 @@ function TodayPage({ activeUserId, activeUser }) {
     }
 
     const todayIso = getTodayIsoDate()
-    const completed = localStorage.getItem(`lockedin-completed-${activeUserId}-${todayIso}`)
+    const completed = localStorage.getItem(getCompletionStorageKey(activeUserId, todayIso))
     if (!completed) {
+      setIsDayCompleted(false)
       return
     }
 
@@ -498,8 +808,10 @@ function TodayPage({ activeUserId, activeUser }) {
         setForm({ ...defaultTodayForm, ...parsed.form })
       }
       setSelectedExercises(parsed.selectedExercises ?? [])
+      setIsDayCompleted(true)
     } catch {
       // Ignore corrupted completion cache.
+      setIsDayCompleted(false)
     }
   }, [activeUserId])
 
@@ -509,7 +821,7 @@ function TodayPage({ activeUserId, activeUser }) {
     }
 
     const todayIso = getTodayIsoDate()
-    const completionKey = `lockedin-completed-${activeUserId}-${todayIso}`
+    const completionKey = getCompletionStorageKey(activeUserId, todayIso)
     if (!localStorage.getItem(completionKey)) {
       return
     }
@@ -549,14 +861,14 @@ function TodayPage({ activeUserId, activeUser }) {
 
   const completion = useMemo(() => {
     const completed = metricDefinitions.filter((definition) =>
-      isComplete(definition, form[definition.key]),
+      isComplete(definition, form[definition.key], goals?.[definition.key]),
     ).length
     return {
       completed,
       total: metricDefinitions.length,
       percent: Math.round((completed / metricDefinitions.length) * 100),
     }
-  }, [form])
+  }, [form, goals])
 
   const dateText = useMemo(
     () =>
@@ -568,11 +880,28 @@ function TodayPage({ activeUserId, activeUser }) {
     [],
   )
 
-  function updateMetric(key, nextValue) {
+  function updateMetric(definition, nextValue) {
     setForm((current) => ({
       ...current,
-      [key]: Math.max(0, Number(nextValue)),
+      [definition.key]: parseMetricInput(definition, nextValue),
     }))
+    const parsedValue = parseMetricInput(definition, nextValue)
+    persistLiveDay(
+      {
+        ...form,
+        [definition.key]: parsedValue,
+      },
+      selectedExercises,
+    )
+    syncLiveDayToApi({
+      ...form,
+      [definition.key]: parsedValue,
+    })
+  }
+
+  function saveCurrentDayProgress() {
+    persistLiveDay(form, selectedExercises)
+    syncLiveDayToApi(form)
   }
 
   function openExerciseSheet() {
@@ -597,6 +926,8 @@ function TodayPage({ activeUserId, activeUser }) {
   function saveExerciseSelection() {
     setSelectedExercises(draftExercises)
     setIsExerciseSheetOpen(false)
+    persistLiveDay(form, draftExercises)
+    syncLiveDayToApi(form)
   }
 
   if (!activeUser) {
@@ -604,7 +935,7 @@ function TodayPage({ activeUserId, activeUser }) {
   }
 
   return (
-    <section className="today-page">
+    <section className={`today-page ${isDayCompleted ? 'is-completed' : ''}`}>
       <header className="today-header">
         <div className="top-icons">
           <div className="brand">
@@ -619,95 +950,123 @@ function TodayPage({ activeUserId, activeUser }) {
         </div>
       </header>
 
-      <div className="daily-progress-card">
-        <div className="daily-progress-row">
-          <h3>Daily Progress</h3>
-          <span className="progress-fraction">
-            {completion.completed} / {completion.total}
-          </span>
-          <span className="progress-percent">{completion.percent}%</span>
-        </div>
-        <div className="progress-track">
-          <div className="progress-fill" style={{ width: `${completion.percent}%` }} />
-        </div>
-      </div>
-
-      <div className="habit-list">
-        {metricDefinitions.map((definition) => {
-          const value = form[definition.key]
-          const progressWidth = getMetricProgress(definition, value)
-          const isExerciseCard = definition.key === 'exerciseMinutes'
-          const selectedExerciseLabels = selectedExercises
-            .map((id) => exerciseOptions.find((option) => option.id === id)?.label)
-            .filter(Boolean)
-          const exerciseSelectionText = selectedExerciseLabels.join(' · ')
-
-          return (
-            <article
-              className={`habit-row-card ${isExerciseCard ? 'exercise-card' : ''}`}
-              key={definition.key}
-              style={{ '--habit-color': definition.color }}
-              onClick={isExerciseCard ? openExerciseSheet : undefined}
-              role={isExerciseCard ? 'button' : undefined}
-              tabIndex={isExerciseCard ? 0 : undefined}
-              onKeyDown={
-                isExerciseCard
-                  ? (event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        openExerciseSheet()
-                      }
-                    }
-                  : undefined
-              }
+      {isDayCompleted ? (
+        <div className="today-completed-state">
+          <section className="day-completed-card">
+            <div className="day-completed-badge">✓</div>
+            <h3>{`Day Completed: ${completion.completed}/${completion.total} goals completed.`}</h3>
+            <p>Your next day will begin at 00:00.</p>
+            <button
+              type="button"
+              className="reopen-day-btn"
+              onClick={() => {
+                localStorage.removeItem(getCompletionStorageKey(activeUserId, getTodayIsoDate()))
+                setIsDayCompleted(false)
+                setIsExerciseSheetOpen(false)
+                setDraftExercises(selectedExercises)
+                persistLiveDay(form, selectedExercises)
+              }}
             >
-              <div className="habit-row-top">
-                <div className="habit-row-main">
-                  <div className="habit-icon" style={{ backgroundColor: `${definition.color}16`, color: definition.color }}>
-                    <HabitIcon metricKey={definition.key} />
-                  </div>
-                  <div>
-                    <h4>{definition.label.toUpperCase()}</h4>
-                    <p className="goal-text">{definition.goalLabel}</p>
-                  </div>
-                </div>
-                <div className="habit-row-right">
-                  {isExerciseCard ? (
-                    <div className="exercise-selection-pill">
-                      {exerciseSelectionText || 'Select'}
+              Re-open day
+            </button>
+          </section>
+        </div>
+      ) : (
+        <>
+          <div className="daily-progress-card">
+            <div className="daily-progress-row">
+              <h3>Daily Progress</h3>
+              <span className="progress-fraction">
+                {completion.completed} / {completion.total}
+              </span>
+              <span className="progress-percent">{completion.percent}%</span>
+            </div>
+            <div className="progress-track">
+              <div className="progress-fill" style={{ width: `${completion.percent}%` }} />
+            </div>
+          </div>
+
+          <div className="habit-list">
+            {metricDefinitions.map((definition) => {
+              const value = form[definition.key]
+              const goalValue = Number(goals?.[definition.key] ?? definition.goalValue)
+              const progressWidth = getMetricProgress(definition, value, goalValue)
+              const isExerciseCard = definition.key === 'exerciseMinutes'
+              const selectedExerciseLabels = selectedExercises
+                .map((id) => exerciseOptions.find((option) => option.id === id)?.label)
+                .filter(Boolean)
+              const exerciseSelectionText = selectedExerciseLabels.join(' · ')
+
+              return (
+                <article
+                  className={`habit-row-card ${isExerciseCard ? 'exercise-card' : ''}`}
+                  key={definition.key}
+                  style={{ '--habit-color': definition.color }}
+                >
+                  <div className="habit-row-top">
+                    <div className="habit-row-main">
+                      <div className="habit-icon" style={{ backgroundColor: `${definition.color}16`, color: definition.color }}>
+                        <HabitIcon metricKey={definition.key} />
+                      </div>
+                      <div>
+                        <h4>{definition.label.toUpperCase()}</h4>
+                        <p className="goal-text">{formatGoalText(definition, goalValue)}</p>
+                      </div>
                     </div>
-                  ) : (
-                    <label className="habit-input-field">
-                      {definition.key === 'moneySpent' && <span className="money-prefix">$</span>}
-                      <input
-                        type="number"
-                        min="0"
-                        step={definition.increment}
-                        value={value}
-                        onChange={(event) => updateMetric(definition.key, event.target.value)}
-                      />
-                      {definition.unitLabel && <span className="habit-unit">{definition.unitLabel}</span>}
-                    </label>
-                  )}
-                </div>
-              </div>
-              <div className="habit-progress-track">
-                <div
-                  className="habit-progress-fill"
-                  style={{ width: `${progressWidth}%`, backgroundColor: definition.color }}
-                />
-              </div>
-            </article>
-          )
-        })}
-      </div>
+                    <div className="habit-row-right">
+                      {isExerciseCard ? (
+                        <div className="exercise-controls">
+                          <label className="habit-input-field exercise-time-field">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              autoComplete="off"
+                              value={value}
+                              onChange={(event) => updateMetric(definition, event.target.value)}
+                              onBlur={saveCurrentDayProgress}
+                            />
+                            <span className="habit-unit">min</span>
+                          </label>
+                          <button type="button" className="exercise-selection-pill" onClick={openExerciseSheet}>
+                            {exerciseSelectionText || 'Select'}
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="habit-input-field">
+                          {definition.key === 'moneySpent' && <span className="money-prefix">£</span>}
+                          <input
+                            type="text"
+                            inputMode={definition.increment >= 1 ? 'numeric' : 'decimal'}
+                            autoComplete="off"
+                            value={value}
+                            onChange={(event) => updateMetric(definition, event.target.value)}
+                            onBlur={saveCurrentDayProgress}
+                          />
+                          {definition.unitLabel && <span className="habit-unit">{definition.unitLabel}</span>}
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                  <div className="habit-progress-track">
+                    <div
+                      className="habit-progress-fill"
+                      style={{ width: `${progressWidth}%`, backgroundColor: definition.color }}
+                    />
+                  </div>
+                </article>
+              )
+            })}
+          </div>
 
-      <button type="button" className="add-habit">
-        <span className="add-habit-plus">+</span> ADD HABIT
-      </button>
+          <button type="button" className="add-habit">
+            <span className="add-habit-plus">+</span> ADD HABIT
+          </button>
 
-      <button type="button" className="complete-day-btn" onClick={completeDay}>
-        COMPLETE DAY
-      </button>
+          <button type="button" className="complete-day-btn" onClick={completeDay}>
+            COMPLETE DAY
+          </button>
+        </>
+      )}
 
       {isExerciseSheetOpen && (
         <>
@@ -744,7 +1103,6 @@ function TodayPage({ activeUserId, activeUser }) {
         </>
       )}
 
-      {showDaySavedPopup && <div className="day-saved-popup">Day saved</div>}
     </section>
   )
 }
@@ -883,17 +1241,25 @@ function formatDisplayDate(dateString) {
   }).format(parsed)
 }
 
-function ComparePage({ users }) {
-  const range = 'weekly'
+function ComparePage({ users, activeUserId }) {
+  const [range, setRange] = useState('weekly')
   const [compareByMetric, setCompareByMetric] = useState({})
+  const [userGoalsById, setUserGoalsById] = useState({})
+  const [isRangeMenuOpen, setIsRangeMenuOpen] = useState(false)
+  const rangeMenuRef = useRef(null)
 
   useEffect(() => {
+    if (!activeUserId) {
+      setCompareByMetric({})
+      return
+    }
+
     let cancelled = false
     const metricKeys = metricDefinitions.map((definition) => definition.key)
 
     Promise.all(
       metricKeys.map((metricKey) =>
-        requestJson(`/api/compare?metric=${metricKey}&range=${range}`)
+        requestJson(`/api/compare?metric=${metricKey}&range=${range}&userId=${activeUserId}`)
           .then((data) => [metricKey, data.data ?? []])
           .catch(() => [metricKey, []]),
       ),
@@ -908,18 +1274,71 @@ function ComparePage({ users }) {
     return () => {
       cancelled = true
     }
-  }, [range])
+  }, [activeUserId, range])
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (rangeMenuRef.current && !rangeMenuRef.current.contains(event.target)) {
+        setIsRangeMenuOpen(false)
+      }
+    }
+
+    function handleEscape(event) {
+      if (event.key === 'Escape') {
+        setIsRangeMenuOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('touchstart', handleClickOutside)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('touchstart', handleClickOutside)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [])
 
   const selectedMetricKeys = metricDefinitions.map((definition) => definition.key)
-  const periodCount = range === 'weekly' ? 7 : 6
-  const periodLabel = range === 'weekly' ? 'days' : 'periods'
+  const periodCount = range === 'today' ? 1 : range === 'weekly' ? 7 : 6
+  const periodLabel = range === 'today' ? 'day' : range === 'weekly' ? 'days' : 'periods'
   const referenceRows = compareByMetric[selectedMetricKeys[0]] ?? []
   const periods = referenceRows.map((row) => row.period)
   const palette = ['#62e47f', '#3d7cff', '#a65bff', '#f09a47', '#27b2a2']
-  const usersByName = users.map((user) => ({
+  const visibleUserNames = new Set(
+    referenceRows.flatMap((row) => Object.keys(row).filter((key) => key !== 'period')),
+  )
+  const visibleUsers = users.filter((user) => visibleUserNames.has(user.name))
+  const usersByName = visibleUsers.map((user) => ({
     ...user,
-    color: palette[users.indexOf(user) % palette.length],
+    color: palette[visibleUsers.indexOf(user) % palette.length],
   }))
+
+  useEffect(() => {
+    if (visibleUsers.length === 0) {
+      setUserGoalsById({})
+      return
+    }
+
+    let cancelled = false
+    Promise.all(
+      visibleUsers.map((user) =>
+        requestJson(`/api/users/${user.id}/goals`)
+          .then((goals) => [user.id, normalizeGoalValues(goals ?? defaultGoalValues)])
+          .catch(() => [user.id, { ...defaultGoalValues }]),
+      ),
+    ).then((entries) => {
+      if (cancelled) {
+        return
+      }
+
+      setUserGoalsById(Object.fromEntries(entries))
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [visibleUsers])
 
   const rankedUsers = usersByName
     .map((user) => {
@@ -946,6 +1365,32 @@ function ComparePage({ users }) {
     })
     .sort((left, right) => right.averageScore - left.averageScore)
 
+  const topUsers = rankedUsers.slice(0, 2)
+
+  function getMetricUserStats(definition, user) {
+    const rows = compareByMetric[definition.key] ?? []
+    const values = rows.map((row) => Number(row?.[user.name] ?? 0))
+    const total = values.reduce((sum, value) => sum + value, 0)
+    const goalValue = Number(userGoalsById?.[user.id]?.[definition.key] ?? definition.goalValue)
+    const completionCount = range === 'today'
+      ? (isComplete(definition, total, goalValue) ? 1 : 0)
+      : values.filter((value) => isComplete(definition, value, goalValue)).length
+    const completionRate = range === 'today'
+      ? getMetricProgress(definition, total, goalValue)
+      : periodCount === 0
+        ? 0
+        : Math.round((completionCount / periodCount) * 100)
+    const bestValue = definition.key === 'moneySpent' && values.length > 0 ? Math.min(...values) : null
+
+    return {
+      total,
+      goalValue,
+      completionCount,
+      completionRate,
+      bestValue,
+    }
+  }
+
   return (
     <section className="compare-page">
       <header className="compare-header">
@@ -958,7 +1403,7 @@ function ComparePage({ users }) {
 
       <section className="compare-rank-card">
         <div className="compare-rank-grid">
-          {rankedUsers.slice(0, 3).map((user, index) => (
+          {topUsers.map((user, index) => (
             <article
               key={user.id}
               className="compare-rank-item"
@@ -966,7 +1411,10 @@ function ComparePage({ users }) {
                 '--compare-color': user.color,
               }}
             >
-              <p className="compare-rank-badge">#{index + 1}</p>
+              <p className="compare-rank-badge">{`#${index + 1}`}</p>
+              <div className="compare-rank-avatar" style={{ borderColor: user.color }}>
+                {user.name[0]}
+              </div>
               <h3>{user.name}</h3>
               <strong>{user.averageScore}</strong>
               <p className="compare-rank-label">Avg. Lock In Score</p>
@@ -981,68 +1429,111 @@ function ComparePage({ users }) {
               </p>
             </article>
           ))}
+          <article className="compare-rank-item compare-add-friend">
+            <div className="compare-add-friend-icon">◯</div>
+            <h3>Add Friend</h3>
+          </article>
         </div>
       </section>
 
       <section className="compare-weekly-card">
         <header className="compare-weekly-head">
-          <h3>Weekly Overview</h3>
-          <span>{periodCount} {periodLabel}</span>
-        </header>
-        <div className="compare-weekly-grid">
-          <div className="compare-weekly-left">
-            {metricDefinitions.map((definition) => (
-                <article key={`metric-row-${definition.key}`} className="compare-metric-row">
-                  <div className="compare-metric-icon" style={{ color: definition.color }}>
-                    <HabitIcon metricKey={definition.key} />
-                  </div>
-                  <div>
-                    <p>{definition.label}</p>
-                    <span>{definition.goalLabel.replace('Goal: ', 'Goal: ')}</span>
-                  </div>
-                </article>
-              ))}
+          <h3>{range === 'today' ? 'Today Overview' : 'Weekly Overview'}</h3>
+          <div className="compare-weekly-controls">
+            <span>{periodCount} {periodLabel}</span>
+            <div className="compare-range-select" ref={rangeMenuRef}>
+              <button
+                type="button"
+                className="compare-range-trigger"
+                onClick={() => setIsRangeMenuOpen((current) => !current)}
+                aria-expanded={isRangeMenuOpen}
+                aria-haspopup="menu"
+              >
+                {range === 'today' ? 'Today' : 'Weekly'}
+              </button>
+              {isRangeMenuOpen && (
+                <div className="compare-range-menu" role="menu">
+                  <button
+                    type="button"
+                    className={`compare-range-menu-item ${range === 'today' ? 'active' : ''}`}
+                    onClick={() => {
+                      setRange('today')
+                      setIsRangeMenuOpen(false)
+                    }}
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    className={`compare-range-menu-item ${range === 'weekly' ? 'active' : ''}`}
+                    onClick={() => {
+                      setRange('weekly')
+                      setIsRangeMenuOpen(false)
+                    }}
+                  >
+                    Weekly
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-
-          {rankedUsers.slice(0, 3).map((user) => (
-            <div key={`weekly-col-${user.id}`} className="compare-weekly-user-col">
-              <div className="compare-weekly-user-head">
-                <span style={{ backgroundColor: `${user.color}35`, color: user.color }}>
-                  {user.name[0]}
-                </span>
-                <strong>{user.name}</strong>
-              </div>
-
-              {metricDefinitions.map((definition) => {
-                  const rows = compareByMetric[definition.key] ?? []
-                  const values = rows.map((row) => Number(row?.[user.name] ?? 0))
-                  const total = values.reduce((sum, value) => sum + value, 0)
-                  const completionCount = values.filter((value) =>
-                    isComplete(definition, value),
-                  ).length
-                  const best =
-                    definition.key === 'moneySpent' && values.length > 0
-                      ? Math.min(...values)
-                      : null
-
-                  return (
-                    <article
-                      key={`${definition.key}-${user.id}`}
-                      className="compare-weekly-user-metric"
-                    >
-                      <strong style={{ color: user.color }}>
-                        {formatCompareTotal(definition, total)}
-                      </strong>
-                      <span>
-                        {definition.key === 'moneySpent' && best !== null
-                          ? `Best: ${formatMoney(best)}`
-                          : `${completionCount} of ${periodCount} ${periodLabel}`}
-                      </span>
-                    </article>
-                  )
-                })}
+        </header>
+        <div className="compare-users-row">
+          {topUsers.map((user) => (
+            <div key={`legend-${user.id}`} className="compare-user-chip">
+              <span style={{ backgroundColor: `${user.color}35`, color: user.color }}>
+                {user.name[0]}
+              </span>
+              <strong>{user.name}</strong>
             </div>
           ))}
+        </div>
+        <div className="compare-metric-list">
+          {metricDefinitions.map((definition) => (
+            <article key={`metric-row-${definition.key}`} className="compare-metric-card">
+              <div className="compare-metric-main">
+                <div className="compare-metric-icon" style={{ color: definition.color }}>
+                  <HabitIcon metricKey={definition.key} />
+                </div>
+                <h4>{definition.label}</h4>
+              </div>
+              <div className="compare-metric-user-values">
+                {topUsers.map((user) => {
+                  const stats = getMetricUserStats(definition, user)
+                  return (
+                    <div key={`${definition.key}-${user.id}`} className="compare-metric-user-col">
+                      <strong style={{ color: user.color }}>
+                        {formatCompareTotal(definition, stats.total)}
+                      </strong>
+                      <span>
+                        {range === 'today'
+                          ? formatTodayGoalProgress(definition, stats.total, stats.goalValue)
+                          : definition.key === 'moneySpent' && stats.bestValue !== null
+                          ? `Best: ${formatMoney(stats.bestValue)}`
+                          : `${stats.completionCount} of ${periodCount} ${periodLabel}`}
+                      </span>
+                      <div className="compare-metric-progress-track">
+                        <div
+                          className="compare-metric-progress-fill"
+                          style={{
+                            width: `${stats.completionRate}%`,
+                            backgroundColor: user.color,
+                          }}
+                        />
+                      </div>
+                      <p>{`${stats.completionRate}%`}</p>
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="compare-metric-chevron">›</div>
+            </article>
+          ))}
+          {topUsers.length === 0 && (
+            <section className="page-card">
+              <p>No users to compare yet.</p>
+            </section>
+          )}
         </div>
       </section>
 
@@ -1090,24 +1581,156 @@ function formatCompareTotal(definition, total) {
   return formatMoney(total)
 }
 
-function formatMoney(value) {
-  return `$${Math.round(value)}`
+function formatTodayGoalProgress(definition, total, goalValue) {
+  if (definition.key === 'moneySpent') {
+    if (total <= goalValue) {
+      return `${formatMoney(goalValue - total)} left`
+    }
+
+    return `${formatMoney(total - goalValue)} over`
+  }
+
+  if (definition.key === 'waterLiters') {
+    return `${total.toFixed(1)}/${goalValue.toFixed(1)} L`
+  }
+
+  if (definition.key === 'exerciseMinutes') {
+    return `${Math.round(total)}/${Math.round(goalValue)} min`
+  }
+
+  if (definition.key === 'sleepHours') {
+    return `${total.toFixed(1)}/${goalValue.toFixed(1)} hrs`
+  }
+
+  if (definition.key === 'steps') {
+    return `${Math.round(total).toLocaleString()}/${Math.round(goalValue).toLocaleString()}`
+  }
+  return `${formatMoney(total)}/${formatMoney(goalValue)}`
 }
 
-function AccountPage({ activeUser }) {
+function formatGoalText(definition, goalValue) {
+  if (definition.key === 'waterLiters') {
+    return `Goal: ${goalValue.toFixed(1)} L`
+  }
+
+  if (definition.key === 'exerciseMinutes') {
+    return `Goal: ${Math.round(goalValue)} min`
+  }
+
+  if (definition.key === 'sleepHours') {
+    return `Goal: ${goalValue.toFixed(1)} hrs`
+  }
+
+  if (definition.key === 'steps') {
+    return `Goal: ${Math.round(goalValue).toLocaleString()}`
+  }
+
+  return `Goal: under £${Math.round(goalValue)}`
+}
+
+function formatMoney(value) {
+  return `£${Math.round(value)}`
+}
+
+function GoalSettingsModal({ initialGoals, isRequired, isSaving, error, onClose, onSave }) {
+  const [goalsForm, setGoalsForm] = useState(() => normalizeGoalValues(initialGoals))
+
+  useEffect(() => {
+    setGoalsForm(normalizeGoalValues(initialGoals))
+  }, [initialGoals])
+
+  function updateGoal(definition, nextValue) {
+    setGoalsForm((current) => ({
+      ...current,
+      [definition.key]: parseMetricInput(definition, nextValue),
+    }))
+  }
+
+  async function submitGoals(event) {
+    event.preventDefault()
+    await onSave(goalsForm)
+  }
+
+  return (
+    <>
+      <button type="button" className="sheet-backdrop" aria-label="Close goals modal" onClick={onClose} />
+      <section className="goals-modal" role="dialog" aria-modal="true" aria-label="Set your goals">
+        <h3>Set your daily goals</h3>
+        <p className="goals-modal-note">
+          You can edit these in the Profile tab at any point.
+        </p>
+        <form className="goals-modal-form" onSubmit={submitGoals}>
+          {metricDefinitions.map((definition) => (
+            <label key={definition.key} className="goals-modal-row">
+              <span>{definition.label}</span>
+              <div className="goals-modal-input-wrap">
+                {definition.key === 'moneySpent' && <span className="goals-modal-prefix">£</span>}
+                <input
+                  type="text"
+                  inputMode={definition.increment >= 1 ? 'numeric' : 'decimal'}
+                  autoComplete="off"
+                  value={goalsForm[definition.key]}
+                  onChange={(event) => updateGoal(definition, event.target.value)}
+                  required
+                />
+                {definition.unitLabel && <span className="goals-modal-unit">{definition.unitLabel}</span>}
+              </div>
+            </label>
+          ))}
+          {error && <p className="auth-error-text">{error}</p>}
+          <div className="goals-modal-actions">
+            {!isRequired && (
+              <button type="button" className="profile-manage-btn" onClick={onClose} disabled={isSaving}>
+                Cancel
+              </button>
+            )}
+            <button type="submit" className="exercise-sheet-done" disabled={isSaving}>
+              {isSaving ? 'Saving...' : 'Save Goals'}
+            </button>
+          </div>
+        </form>
+      </section>
+    </>
+  )
+}
+
+function AccountPage({ activeUser, goals, onManageGoals, onSignOut }) {
   if (!activeUser) {
     return <section className="page-card">Loading profile...</section>
   }
 
-  const roomCodeStorageKey = `lockedin-room-${activeUser.id}`
   const [roomCodeInput, setRoomCodeInput] = useState('')
   const [joinedRoomCode, setJoinedRoomCode] = useState('')
+  const [roomError, setRoomError] = useState('')
+  const [isSavingRoom, setIsSavingRoom] = useState(false)
 
   useEffect(() => {
-    const savedCode = localStorage.getItem(roomCodeStorageKey) ?? ''
-    setJoinedRoomCode(savedCode)
-    setRoomCodeInput(savedCode)
-  }, [roomCodeStorageKey])
+    let cancelled = false
+    setRoomError('')
+
+    requestJson(`/api/users/${activeUser.id}/room`)
+      .then((data) => {
+        if (cancelled) {
+          return
+        }
+
+        const roomCode = String(data?.roomCode ?? '').trim().toUpperCase()
+        setJoinedRoomCode(roomCode)
+        setRoomCodeInput(roomCode)
+      })
+      .catch(() => {
+        if (cancelled) {
+          return
+        }
+
+        setJoinedRoomCode('')
+        setRoomCodeInput('')
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeUser.id])
 
   const joinedDate = new Intl.DateTimeFormat('en-GB', {
     day: '2-digit',
@@ -1127,16 +1750,46 @@ function AccountPage({ activeUser }) {
     { key: 'rate', icon: '↗', value: `${completionRate}%`, label: 'Completion rate', color: '#62e47f' },
   ]
 
-  function submitRoomCode(event) {
+  async function submitRoomCode(event) {
     event.preventDefault()
+    setRoomError('')
     const cleanedCode = roomCodeInput.trim().toUpperCase()
     if (!cleanedCode) {
       return
     }
 
-    localStorage.setItem(roomCodeStorageKey, cleanedCode)
-    setJoinedRoomCode(cleanedCode)
-    setRoomCodeInput(cleanedCode)
+    setIsSavingRoom(true)
+    try {
+      const data = await requestJson(`/api/users/${activeUser.id}/room`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomCode: cleanedCode }),
+      })
+
+      const savedRoomCode = String(data?.roomCode ?? cleanedCode).toUpperCase()
+      setJoinedRoomCode(savedRoomCode)
+      setRoomCodeInput(savedRoomCode)
+    } catch {
+      setRoomError('Could not save room code right now.')
+    } finally {
+      setIsSavingRoom(false)
+    }
+  }
+
+  async function clearRoomCode() {
+    setRoomError('')
+    setIsSavingRoom(true)
+    try {
+      await requestJson(`/api/users/${activeUser.id}/room`, {
+        method: 'DELETE',
+      })
+      setJoinedRoomCode('')
+      setRoomCodeInput('')
+    } catch {
+      setRoomError('Could not leave room right now.')
+    } finally {
+      setIsSavingRoom(false)
+    }
   }
 
   return (
@@ -1156,9 +1809,14 @@ function AccountPage({ activeUser }) {
               <span>{activeUser.streakDays} day streak</span>
             </div>
           </div>
-          <button type="button" className="profile-edit-btn">
-            Edit Profile
-          </button>
+          <div className="profile-hero-actions">
+            <button type="button" className="profile-edit-btn">
+              Edit Profile
+            </button>
+            <button type="button" className="profile-signout-btn" onClick={onSignOut}>
+              Sign Out
+            </button>
+          </div>
         </div>
 
         <div className="profile-stats-grid">
@@ -1185,7 +1843,7 @@ function AccountPage({ activeUser }) {
       <article className="profile-goals-card">
         <div className="profile-card-title-row">
           <h3>My Goals</h3>
-          <button type="button" className="profile-manage-btn">
+          <button type="button" className="profile-manage-btn" onClick={onManageGoals}>
             Manage Goals
           </button>
         </div>
@@ -1202,18 +1860,25 @@ function AccountPage({ activeUser }) {
                 </div>
               </div>
               <div className="profile-goal-right">
-                <strong style={{ color: definition.color }}>
-                  {formatCompareTotal(definition, definition.goalValue)}
-                </strong>
-                <div className="profile-goal-track">
-                  <div
-                    className="profile-goal-fill"
-                    style={{
-                      width: `${[72, 85, 74, 76, 58][index] ?? 65}%`,
-                      backgroundColor: definition.color,
-                    }}
-                  />
-                </div>
+                {(() => {
+                  const goalValue = Number(goals?.[definition.key] ?? definition.goalValue)
+                  return (
+                    <>
+                      <strong style={{ color: definition.color }}>
+                        {formatCompareTotal(definition, goalValue)}
+                      </strong>
+                      <div className="profile-goal-track">
+                        <div
+                          className="profile-goal-fill"
+                          style={{
+                            width: `${[72, 85, 74, 76, 58][index] ?? 65}%`,
+                            backgroundColor: definition.color,
+                          }}
+                        />
+                      </div>
+                    </>
+                  )
+                })()}
               </div>
             </article>
           ))}
@@ -1240,14 +1905,24 @@ function AccountPage({ activeUser }) {
           <button
             type="submit"
             className="profile-room-submit-btn"
-            disabled={roomCodeInput.trim().length === 0}
+            disabled={roomCodeInput.trim().length === 0 || isSavingRoom}
           >
-            Join Room
+            {isSavingRoom ? 'Saving...' : 'Join Room'}
           </button>
         </form>
+        {roomError && <p className="auth-error-text">{roomError}</p>}
         {joinedRoomCode && (
           <p className="profile-room-current">
             Current room: <strong>{joinedRoomCode}</strong>
+            <button
+              type="button"
+              className="profile-room-remove-btn"
+              aria-label="Leave room"
+              onClick={clearRoomCode}
+              disabled={isSavingRoom}
+            >
+              ×
+            </button>
           </p>
         )}
       </article>
@@ -1255,20 +1930,22 @@ function AccountPage({ activeUser }) {
   )
 }
 
-function isComplete(definition, value) {
+function isComplete(definition, value, goalOverride) {
+  const goalValue = Number(goalOverride ?? definition.goalValue)
   if (definition.key === 'moneySpent') {
-    return value <= definition.goalValue
+    return value <= goalValue
   }
 
-  return value >= definition.goalValue
+  return value >= goalValue
 }
 
-function getMetricProgress(definition, value) {
+function getMetricProgress(definition, value, goalOverride) {
+  const goalValue = Math.max(0.0001, Number(goalOverride ?? definition.goalValue))
   if (definition.key === 'moneySpent') {
-    return Math.max(0, Math.min(100, Math.round((value / definition.goalValue) * 100)))
+    return Math.max(0, Math.min(100, Math.round(((goalValue - value) / goalValue) * 100)))
   }
 
-  return Math.max(0, Math.min(100, Math.round((value / definition.goalValue) * 100)))
+  return Math.max(0, Math.min(100, Math.round((value / goalValue) * 100)))
 }
 
 function HabitIcon({ metricKey }) {
@@ -1345,6 +2022,45 @@ function DashboardSummaryIcon({ type }) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M8 4h8v3a4 4 0 0 0 4 4h0v2a6 6 0 0 1-6 6h-4a6 6 0 0 1-6-6v-2h0a4 4 0 0 0 4-4V4Z" />
       <path d="M8 20h8" />
+    </svg>
+  )
+}
+
+function BottomNavIcon({ type }) {
+  if (type === 'today') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="6.5" />
+        <circle cx="12" cy="12" r="1.8" />
+        <path d="M12 5V3m0 18v-2m7-7h2M3 12h2" />
+        <path d="m16.5 7.5 1.9-1.9" />
+      </svg>
+    )
+  }
+
+  if (type === 'dashboard') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M4 18V12m5 6V7m5 11V9m5 9V5" />
+      </svg>
+    )
+  }
+
+  if (type === 'compare') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="8" cy="9" r="2.6" />
+        <circle cx="16.5" cy="9.5" r="2.3" />
+        <path d="M3.8 18.2c.7-2.5 2.7-4 4.8-4s4.1 1.5 4.8 4" />
+        <path d="M12.5 18c.6-1.8 2.1-3 3.9-3 1.6 0 3 .9 3.8 2.6" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="8" r="3.3" />
+      <path d="M6.3 19c.8-3.1 3-4.8 5.7-4.8 2.7 0 4.9 1.7 5.7 4.8" />
     </svg>
   )
 }
