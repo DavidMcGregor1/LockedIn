@@ -1770,3 +1770,21 @@
   text-decoration: none;
   padding: 8px 10px;
 }
+
+@media (min-width: 768px) {
+  .mobile-app {
+    width: min(640px, 100%);
+  }
+
+  .bottom-nav {
+    width: min(640px, 100vw);
+  }
+
+  .content {
+    padding: 18px 18px 112px;
+  }
+
+  .goals-modal {
+    width: min(460px, calc(100vw - 36px));
+  }
+}
