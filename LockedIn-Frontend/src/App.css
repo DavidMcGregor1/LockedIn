@@ -1077,6 +1077,8 @@ body,
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .compare-header {
@@ -1506,6 +1508,14 @@ body,
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.compare-page::-webkit-scrollbar,
+.profile-page::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .profile-page-header h2 {
