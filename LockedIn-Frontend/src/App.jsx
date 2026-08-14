@@ -1932,10 +1932,22 @@ function AccountPage({ activeUser, goals, onManageGoals, onSignOut }) {
             </button>
           </p>
         )}
-        <div className="profile-link-buttons">
-          <Link to="/support" className="profile-link-btn">Support</Link>
-          <Link to="/privacy" className="profile-link-btn">Privacy</Link>
+      </article>
+
+      <article className="profile-link-card">
+        <div className="profile-card-title-row">
+          <h3>Support</h3>
         </div>
+        <p className="profile-link-copy">Need help with your account or app issues?</p>
+        <Link to="/support" className="profile-link-btn">Open Support</Link>
+      </article>
+
+      <article className="profile-link-card">
+        <div className="profile-card-title-row">
+          <h3>Privacy</h3>
+        </div>
+        <p className="profile-link-copy">Read how Locked In handles your data.</p>
+        <Link to="/privacy" className="profile-link-btn">Open Privacy Policy</Link>
       </article>
     </section>
   )

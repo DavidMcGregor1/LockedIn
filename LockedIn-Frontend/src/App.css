@@ -1488,7 +1488,8 @@
 
 .profile-hero-card,
 .profile-goals-card,
-.profile-room-card {
+.profile-room-card,
+.profile-link-card {
   border: 1px solid #243146;
   border-radius: 12px;
   background: rgba(10, 17, 29, 0.88);
@@ -1575,7 +1576,8 @@
 }
 
 .profile-goals-card,
-.profile-room-card {
+.profile-room-card,
+.profile-link-card {
   padding: 10px;
 }
 
@@ -1749,14 +1751,15 @@
   padding: 0;
 }
 
-.profile-link-buttons {
-  margin-top: 10px;
-  display: flex;
-  gap: 8px;
+.profile-link-copy {
+  margin: 8px 0 0;
+  color: #9cacbf;
+  font-size: 0.8rem;
 }
 
 .profile-link-btn {
-  flex: 1;
+  margin-top: 10px;
+  display: block;
   border: 1px solid #2a364c;
   border-radius: 8px;
   background: rgba(16, 24, 38, 0.9);
