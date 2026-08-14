@@ -1,7 +1,16 @@
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
 .mobile-app {
   width: min(430px, 100%);
   margin: 0 auto;
   min-height: 100svh;
+  height: 100svh;
+  overflow: hidden;
   background:
     radial-gradient(110% 70% at 10% 0%, rgba(38, 58, 120, 0.24) 0%, rgba(10, 13, 22, 0) 45%),
     radial-gradient(90% 80% at 90% 0%, rgba(27, 52, 93, 0.2) 0%, rgba(10, 13, 22, 0) 40%),
@@ -12,6 +21,9 @@
 
 .content {
   padding: 14px 14px 104px;
+  height: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .auth-page {
@@ -803,8 +815,9 @@
   flex-direction: column;
   min-height: calc(100svh - 170px);
   justify-content: space-between;
-  gap: 14px;
-  padding-top: 8px;
+  gap: 10px;
+  padding-top: calc(env(safe-area-inset-top) + 48px);
+  overflow: hidden;
 }
 
 .dashboard-header {
@@ -1049,8 +1062,9 @@
   flex-direction: column;
   min-height: calc(100svh - 170px);
   justify-content: space-between;
-  gap: 14px;
-  padding-top: 8px;
+  gap: 10px;
+  padding-top: calc(env(safe-area-inset-top) + 48px);
+  overflow: hidden;
 }
 
 .compare-header {
@@ -1471,7 +1485,10 @@
 .profile-page {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  min-height: calc(100svh - 170px);
+  gap: 8px;
+  padding-top: calc(env(safe-area-inset-top) + 48px);
+  overflow: hidden;
 }
 
 .profile-page-header h2 {
