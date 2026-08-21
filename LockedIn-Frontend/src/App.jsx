@@ -1097,10 +1097,6 @@ function TodayPage({ activeUserId, activeUser, goals }) {
             })}
           </div>
 
-          <button type="button" className="add-habit">
-            <span className="add-habit-plus">+</span> ADD HABIT
-          </button>
-
           <button type="button" className="complete-day-btn" onClick={completeDay}>
             COMPLETE DAY
           </button>
@@ -1548,10 +1544,6 @@ function ComparePage({ users, activeUserId }) {
               </p>
             </article>
           ))}
-          <article className="compare-rank-item compare-add-friend">
-            <div className="compare-add-friend-icon">◯</div>
-            <h3>Add Friend</h3>
-          </article>
         </div>
       </section>
 
@@ -1917,9 +1909,6 @@ function AccountPage({ activeUser, goals, onManageGoals, onSignOut }) {
             </div>
           </div>
           <div className="profile-hero-actions">
-            <button type="button" className="profile-edit-btn">
-              Edit Profile
-            </button>
             <button type="button" className="profile-signout-btn" onClick={onSignOut}>
               Sign Out
             </button>

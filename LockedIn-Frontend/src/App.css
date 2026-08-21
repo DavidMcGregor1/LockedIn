@@ -441,23 +441,6 @@ body,
   border-radius: 999px;
 }
 
-.add-habit {
-  width: 100%;
-  border: 1px dashed #2f3b52;
-  border-radius: 14px;
-  background: rgba(9, 15, 25, 0.55);
-  padding: 11px;
-  color: #e7edf8;
-  font-size: 0.95rem;
-  letter-spacing: 0.02rem;
-}
-
-.add-habit-plus {
-  color: #62e47f;
-  margin-right: 10px;
-  font-weight: 700;
-}
-
 .complete-day-btn {
   width: 100%;
   border: 1px solid #3b8f52;
@@ -1216,30 +1199,6 @@ body,
   line-height: 1.2;
 }
 
-.compare-add-friend {
-  border: 1px solid #2a3750;
-  background: rgba(11, 18, 30, 0.78);
-  color: #c9d5ec;
-  display: grid;
-  place-items: center;
-}
-
-.compare-add-friend h3 {
-  margin-top: 6px;
-  font-size: 0.75rem;
-}
-
-.compare-add-friend-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  border: 1px dashed #30405b;
-  display: grid;
-  place-items: center;
-  font-size: 1.15rem;
-  color: #8ea2c4;
-}
-
 .compare-weekly-card {
   border: 1px solid #2a3850;
   border-radius: 14px;
@@ -1589,7 +1548,6 @@ body,
   font-weight: 700;
 }
 
-.profile-edit-btn,
 .profile-manage-btn {
   border: 1px solid #2a364c;
   border-radius: 8px;
@@ -1597,10 +1555,6 @@ body,
   color: #d6deee;
   font-size: 0.72rem;
   font-weight: 600;
-}
-
-.profile-edit-btn {
-  padding: 7px 10px;
 }
 
 .profile-hero-actions {
