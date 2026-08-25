@@ -104,6 +104,34 @@ app.MapPost("/api/auth/login", async (LoginRequest request) =>
     return user is null ? Results.Unauthorized() : Results.Ok(user);
 });
 
+app.MapDelete("/api/users/{userId}", async (string userId) =>
+{
+    if (string.IsNullOrWhiteSpace(dbConnectionString))
+    {
+        return Results.Problem("Database connection is not configured.");
+    }
+
+    if (!long.TryParse(userId, out var userIdValue))
+    {
+        return Results.BadRequest(new { error = "Invalid userId." });
+    }
+
+    if (!await UserExistsAsync(dbConnectionString, userIdValue))
+    {
+        return Results.NotFound();
+    }
+
+    try
+    {
+        await DeleteUserAccountAsync(dbConnectionString, userIdValue);
+        return Results.NoContent();
+    }
+    catch (MySqlException ex)
+    {
+        return Results.Problem($"Failed to delete account (MySQL {ex.Number}): {ex.Message}");
+    }
+});
+
 app.MapGet("/api/users", async () =>
 {
     if (string.IsNullOrWhiteSpace(dbConnectionString))
@@ -444,7 +472,7 @@ app.MapGet("/api/dashboard/{userId}", async (string userId) =>
     var userEntries = await LoadEntriesForUserAsync(dbConnectionString, userIdValue);
     var weeklyTrend = BuildWeeklyTrend(userEntries);
     var monthlyTrend = BuildMonthlyTrend(userEntries);
-    var summary = BuildDashboardSummary(userEntries, user.StreakDays);
+    var summary = await BuildDashboardSummaryAsync(dbConnectionString, userIdValue, userEntries, user.StreakDays);
     var bestRecords = BuildBestRecords(userEntries);
 
     return Results.Ok(
@@ -1341,6 +1369,49 @@ static async Task RemoveUserRoomCodeAsync(string connectionString, long userId)
     }
 }
 
+static async Task DeleteUserAccountAsync(string connectionString, long userId)
+{
+    await using var connection = new MySqlConnection(connectionString);
+    await connection.OpenAsync();
+    await EnsureRoomTablesAsync(connection);
+    await using var transaction = await connection.BeginTransactionAsync();
+
+    await DeleteUserDataIfTableExistsAsync(connection, transaction, "daily_entries", userId);
+    await DeleteUserDataIfTableExistsAsync(connection, transaction, "user_goals", userId);
+    await DeleteUserDataIfTableExistsAsync(connection, transaction, "user_rooms", userId);
+
+    await using (var deleteUserCommand = new MySqlCommand(
+        """
+        DELETE FROM users
+        WHERE id = @userId;
+        """,
+        connection,
+        transaction))
+    {
+        deleteUserCommand.Parameters.AddWithValue("@userId", userId);
+        await deleteUserCommand.ExecuteNonQueryAsync();
+    }
+
+    await transaction.CommitAsync();
+}
+
+static async Task DeleteUserDataIfTableExistsAsync(MySqlConnection connection, MySqlTransaction transaction, string tableName, long userId)
+{
+    try
+    {
+        await using var command = new MySqlCommand(
+            $"DELETE FROM `{tableName}` WHERE user_id = @userId;",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("@userId", userId);
+        await command.ExecuteNonQueryAsync();
+    }
+    catch (MySqlException ex) when (ex.Number == 1146)
+    {
+        // Ignore missing optional tables in older deployments.
+    }
+}
+
 static async Task EnsureRoomTablesAsync(MySqlConnection connection)
 {
     await using var createUserRoomsTableCommand = new MySqlCommand(
@@ -1622,18 +1693,39 @@ static async Task<List<DailyEntry>> LoadDayEntriesForDateAsync(string connection
     return await ReadEntriesAsync(command);
 }
 
-static object BuildDashboardSummary(List<DailyEntry> userEntries, int currentStreakDays)
+static async Task<object> BuildDashboardSummaryAsync(string connectionString, long userId, List<DailyEntry> userEntries, int currentStreakDays)
 {
     var daysCompleted = userEntries.Select(item => item.Date).Distinct().Count();
-    var averageScore = userEntries.Count == 0
-        ? 0
-        : (int)Math.Round(userEntries.Average(GetDailyScore), MidpointRounding.AwayFromZero);
+    const int calibrationDaysRequired = 7;
+    var calibrationDaysCompleted = Math.Min(daysCompleted, calibrationDaysRequired);
+    var isScoreCalibrated = daysCompleted >= calibrationDaysRequired;
+    int? averageScore = null;
+    var goals = await LoadUserGoalsAsync(connectionString, userId) ?? GetDefaultGoals();
+    var latestEntries = userEntries
+        .GroupBy(item => item.Date)
+        .ToDictionary(group => group.Key, group => group.OrderByDescending(item => item.Date).First());
+    var scoringDays = latestEntries.Keys
+        .OrderByDescending(item => item)
+        .Take(calibrationDaysRequired)
+        .ToList();
+
+    if (scoringDays.Count > 0)
+    {
+        var dailyScores = scoringDays
+            .Select(day => GetDailyScore(latestEntries[day], goals))
+            .ToList();
+        averageScore = (int)Math.Round(dailyScores.Average(), MidpointRounding.AwayFromZero);
+    }
+
     var bestStreak = Math.Max(currentStreakDays, CalculateBestStreak(userEntries));
 
     return new
     {
         daysCompleted,
         averageScore,
+        isScoreCalibrated,
+        calibrationDaysRequired,
+        calibrationDaysCompleted,
         bestStreak,
     };
 }
@@ -1676,35 +1768,40 @@ static List<object> BuildBestRecords(List<DailyEntry> userEntries)
     ];
 }
 
-static decimal GetDailyScore(DailyEntry entry)
+static int GetDailyScore(DailyEntry entry, UserGoals goals)
 {
     var completedCount = 0;
-    if (entry.WaterLiters >= 3)
+    if (entry.WaterLiters >= goals.WaterLiters)
     {
         completedCount++;
     }
 
-    if (entry.ExerciseMinutes >= 45)
+    if (entry.ExerciseMinutes >= goals.ExerciseMinutes)
     {
         completedCount++;
     }
 
-    if (entry.SleepHours >= 8)
+    if (entry.SleepHours >= goals.SleepHours)
     {
         completedCount++;
     }
 
-    if (entry.Steps >= 10000)
+    if (entry.Steps >= goals.Steps)
     {
         completedCount++;
     }
 
-    if (entry.MoneySpent <= 50)
+    if (entry.MoneySpent <= goals.MoneySpent)
     {
         completedCount++;
     }
 
-    return completedCount * 20m;
+    return (int)Math.Round((completedCount / 5m) * 100m, MidpointRounding.AwayFromZero);
+}
+
+static UserGoals GetDefaultGoals()
+{
+    return new UserGoals(2m, 45, 8m, 10000, 20m);
 }
 
 static int CalculateBestStreak(List<DailyEntry> userEntries)

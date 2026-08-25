@@ -383,6 +383,7 @@ function App() {
                       activeUser={activeUser}
                       goals={userGoals}
                       onSignOut={clearAuthSession}
+                      onDeleteAccount={clearAuthSession}
                       onManageGoals={() => {
                         setGoalsError('')
                         setIsGoalsRequired(false)
@@ -617,7 +618,7 @@ function PrivacyPage() {
       <h2>Privacy Policy</h2>
       <p>Locked In stores account details, goals, room membership, and habit entries so the app can function.</p>
       <p>We do not sell your personal data. Data is only used to provide app features and support.</p>
-      <p>To request data deletion or ask privacy questions, contact <a href="mailto:privacy@lockedin.app">privacy@lockedin.app</a>.</p>
+      <p>You can permanently delete your account at any time from Profile → Delete Account. For privacy questions, contact <a href="mailto:privacy@lockedin.app">privacy@lockedin.app</a>.</p>
       <p className="public-page-links">
         <Link to="/support">Support</Link>
         <span>·</span>
@@ -1805,21 +1806,29 @@ function GoalSettingsModal({ initialGoals, isRequired, isSaving, error, onClose,
   )
 }
 
-function AccountPage({ activeUser, goals, onManageGoals, onSignOut }) {
-  if (!activeUser) {
-    return <section className="page-card">Loading profile...</section>
-  }
-
+function AccountPage({ activeUser, goals, onManageGoals, onSignOut, onDeleteAccount }) {
+  const userId = activeUser?.id ?? ''
   const [roomCodeInput, setRoomCodeInput] = useState('')
   const [joinedRoomCode, setJoinedRoomCode] = useState('')
   const [roomError, setRoomError] = useState('')
   const [isSavingRoom, setIsSavingRoom] = useState(false)
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+  const [deleteConfirmationInput, setDeleteConfirmationInput] = useState('')
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false)
+  const [deleteAccountError, setDeleteAccountError] = useState('')
 
   useEffect(() => {
+    if (!userId) {
+      setJoinedRoomCode('')
+      setRoomCodeInput('')
+      setRoomError('')
+      return
+    }
+
     let cancelled = false
     setRoomError('')
 
-    requestJson(`/api/users/${activeUser.id}/room`)
+    requestJson(`/api/users/${userId}/room`)
       .then((data) => {
         if (cancelled) {
           return
@@ -1841,7 +1850,11 @@ function AccountPage({ activeUser, goals, onManageGoals, onSignOut }) {
     return () => {
       cancelled = true
     }
-  }, [activeUser.id])
+  }, [userId])
+
+  if (!activeUser) {
+    return <section className="page-card">Loading profile...</section>
+  }
 
   const joinedDate = new Intl.DateTimeFormat('en-GB', {
     day: '2-digit',
@@ -1859,7 +1872,7 @@ function AccountPage({ activeUser, goals, onManageGoals, onSignOut }) {
 
     setIsSavingRoom(true)
     try {
-      const data = await requestJson(`/api/users/${activeUser.id}/room`, {
+      const data = await requestJson(`/api/users/${userId}/room`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ roomCode: cleanedCode }),
@@ -1891,134 +1904,218 @@ function AccountPage({ activeUser, goals, onManageGoals, onSignOut }) {
     }
   }
 
-  return (
-    <section className="profile-page">
-      <header className="profile-page-header">
-        <h2>Profile</h2>
-        <p>Manage your account and track your journey.</p>
-      </header>
+  function closeDeleteModal() {
+    if (isDeletingAccount) {
+      return
+    }
 
-      <article className="profile-hero-card">
-        <div className="profile-hero-top">
-          <div className="profile-hero-left">
-            <div className="profile-avatar">{activeUser.name[0]}</div>
-            <div>
-              <h3>{activeUser.name}</h3>
-              <p>Joined {joinedDate}</p>
-              <span>{activeUser.streakDays} day streak</span>
+    setIsDeleteModalOpen(false)
+    setDeleteConfirmationInput('')
+    setDeleteAccountError('')
+  }
+
+  async function deleteAccount() {
+    setDeleteAccountError('')
+    setIsDeletingAccount(true)
+
+    try {
+      await requestJson(`/api/users/${userId}`, {
+        method: 'DELETE',
+      })
+      onDeleteAccount()
+    } catch {
+      setDeleteAccountError('Could not delete your account right now. Please try again.')
+      setIsDeletingAccount(false)
+    }
+  }
+
+  return (
+    <>
+      <section className="profile-page">
+        <header className="profile-page-header">
+          <h2>Profile</h2>
+          <p>Manage your account and track your journey.</p>
+        </header>
+
+        <article className="profile-hero-card">
+          <div className="profile-hero-top">
+            <div className="profile-hero-left">
+              <div className="profile-avatar">{activeUser.name[0]}</div>
+              <div>
+                <h3>{activeUser.name}</h3>
+                <p>Joined {joinedDate}</p>
+                <span>{activeUser.streakDays} day streak</span>
+              </div>
+            </div>
+            <div className="profile-hero-actions">
+              <button type="button" className="profile-signout-btn" onClick={onSignOut}>
+                Sign Out
+              </button>
             </div>
           </div>
-          <div className="profile-hero-actions">
-            <button type="button" className="profile-signout-btn" onClick={onSignOut}>
-              Sign Out
+        </article>
+
+        <article className="profile-goals-card">
+          <div className="profile-card-title-row">
+            <h3>My Goals</h3>
+            <button type="button" className="profile-manage-btn" onClick={onManageGoals}>
+              Manage Goals
             </button>
           </div>
-        </div>
-      </article>
-
-      <article className="profile-goals-card">
-        <div className="profile-card-title-row">
-          <h3>My Goals</h3>
-          <button type="button" className="profile-manage-btn" onClick={onManageGoals}>
-            Manage Goals
-          </button>
-        </div>
-        <div className="profile-goals-list">
-          {metricDefinitions.map((definition, index) => (
-            <article key={definition.key} className="profile-goal-row">
-              <div className="profile-goal-main">
-                <div className="profile-goal-icon" style={{ color: definition.color }}>
-                  <HabitIcon metricKey={definition.key} />
+          <div className="profile-goals-list">
+            {metricDefinitions.map((definition, index) => (
+              <article key={definition.key} className="profile-goal-row">
+                <div className="profile-goal-main">
+                  <div className="profile-goal-icon" style={{ color: definition.color }}>
+                    <HabitIcon metricKey={definition.key} />
+                  </div>
+                  <div>
+                    <h4>{definition.label}</h4>
+                    <p>{definition.key === 'moneySpent' ? 'Daily goal (under)' : 'Daily goal'}</p>
+                  </div>
                 </div>
-                <div>
-                  <h4>{definition.label}</h4>
-                  <p>{definition.key === 'moneySpent' ? 'Daily goal (under)' : 'Daily goal'}</p>
+                <div className="profile-goal-right">
+                  {(() => {
+                    const goalValue = Number(goals?.[definition.key] ?? definition.goalValue)
+                    return (
+                      <>
+                        <strong style={{ color: definition.color }}>
+                          {formatCompareTotal(definition, goalValue)}
+                        </strong>
+                        <div className="profile-goal-track">
+                          <div
+                            className="profile-goal-fill"
+                            style={{
+                              width: `${[72, 85, 74, 76, 58][index] ?? 65}%`,
+                              backgroundColor: definition.color,
+                            }}
+                          />
+                        </div>
+                      </>
+                    )
+                  })()}
                 </div>
-              </div>
-              <div className="profile-goal-right">
-                {(() => {
-                  const goalValue = Number(goals?.[definition.key] ?? definition.goalValue)
-                  return (
-                    <>
-                      <strong style={{ color: definition.color }}>
-                        {formatCompareTotal(definition, goalValue)}
-                      </strong>
-                      <div className="profile-goal-track">
-                        <div
-                          className="profile-goal-fill"
-                          style={{
-                            width: `${[72, 85, 74, 76, 58][index] ?? 65}%`,
-                            backgroundColor: definition.color,
-                          }}
-                        />
-                      </div>
-                    </>
-                  )
-                })()}
-              </div>
-            </article>
-          ))}
-        </div>
-      </article>
+              </article>
+            ))}
+          </div>
+        </article>
 
-      <article className="profile-room-card">
-        <div className="profile-card-title-row">
-          <h3>Room Code</h3>
-          {joinedRoomCode && <span className="profile-room-active-label">Connected</span>}
-        </div>
-        <p className="profile-room-help">
-          Enter your friend room code so you&apos;re grouped in the same room.
-        </p>
-        <form className="profile-room-form" onSubmit={submitRoomCode}>
-          <input
-            type="text"
-            value={roomCodeInput}
-            onChange={(event) => setRoomCodeInput(event.target.value)}
-            placeholder="e.g. LOCKIN23"
-            maxLength={16}
-            className="profile-room-input"
-          />
-          <button
-            type="submit"
-            className="profile-room-submit-btn"
-            disabled={roomCodeInput.trim().length === 0 || isSavingRoom}
-          >
-            {isSavingRoom ? 'Saving...' : 'Join Room'}
-          </button>
-        </form>
-        {roomError && <p className="auth-error-text">{roomError}</p>}
-        {joinedRoomCode && (
-          <p className="profile-room-current">
-            Current room: <strong>{joinedRoomCode}</strong>
-            <button
-              type="button"
-              className="profile-room-remove-btn"
-              aria-label="Leave room"
-              onClick={clearRoomCode}
-              disabled={isSavingRoom}
-            >
-              ×
-            </button>
+        <article className="profile-room-card">
+          <div className="profile-card-title-row">
+            <h3>Room Code</h3>
+            {joinedRoomCode && <span className="profile-room-active-label">Connected</span>}
+          </div>
+          <p className="profile-room-help">
+            Enter your friend room code so you&apos;re grouped in the same room.
           </p>
-        )}
-      </article>
+          <form className="profile-room-form" onSubmit={submitRoomCode}>
+            <input
+              type="text"
+              value={roomCodeInput}
+              onChange={(event) => setRoomCodeInput(event.target.value)}
+              placeholder="e.g. LOCKIN23"
+              maxLength={16}
+              className="profile-room-input"
+            />
+            <button
+              type="submit"
+              className="profile-room-submit-btn"
+              disabled={roomCodeInput.trim().length === 0 || isSavingRoom}
+            >
+              {isSavingRoom ? 'Saving...' : 'Join Room'}
+            </button>
+          </form>
+          {roomError && <p className="auth-error-text">{roomError}</p>}
+          {joinedRoomCode && (
+            <p className="profile-room-current">
+              Current room: <strong>{joinedRoomCode}</strong>
+              <button
+                type="button"
+                className="profile-room-remove-btn"
+                aria-label="Leave room"
+                onClick={clearRoomCode}
+                disabled={isSavingRoom}
+              >
+                ×
+              </button>
+            </p>
+          )}
+        </article>
 
-      <article className="profile-link-card">
-        <div className="profile-card-title-row">
-          <h3>Support</h3>
-        </div>
-        <p className="profile-link-copy">Need help with your account or app issues?</p>
-        <Link to="/support" className="profile-link-btn">Open Support</Link>
-      </article>
+        <article className="profile-link-card">
+          <div className="profile-card-title-row">
+            <h3>Support</h3>
+          </div>
+          <p className="profile-link-copy">Need help with your account or app issues?</p>
+          <Link to="/support" className="profile-link-btn">Open Support</Link>
+        </article>
 
-      <article className="profile-link-card">
-        <div className="profile-card-title-row">
-          <h3>Privacy</h3>
-        </div>
-        <p className="profile-link-copy">Read how Locked In handles your data.</p>
-        <Link to="/privacy" className="profile-link-btn">Open Privacy Policy</Link>
-      </article>
-    </section>
+        <article className="profile-link-card">
+          <div className="profile-card-title-row">
+            <h3>Privacy</h3>
+          </div>
+          <p className="profile-link-copy">Read how Locked In handles your data.</p>
+          <Link to="/privacy" className="profile-link-btn">Open Privacy Policy</Link>
+        </article>
+
+        <article className="profile-delete-card">
+          <div className="profile-card-title-row">
+            <h3>Delete Account</h3>
+          </div>
+          <p className="profile-link-copy">Permanently delete your account and all Locked In data.</p>
+          <button
+            type="button"
+            className="profile-delete-btn"
+            onClick={() => {
+              setDeleteAccountError('')
+              setDeleteConfirmationInput('')
+              setIsDeleteModalOpen(true)
+            }}
+          >
+            Delete Account
+          </button>
+        </article>
+      </section>
+
+      {isDeleteModalOpen && (
+        <>
+          <button
+            type="button"
+            className="sheet-backdrop"
+            aria-label="Close delete account modal"
+            onClick={closeDeleteModal}
+          />
+          <section className="profile-delete-modal" role="dialog" aria-modal="true" aria-label="Delete account">
+            <h3>Delete account?</h3>
+            <p>This permanently deletes your account, goals, room membership, and habit entries.</p>
+            <p>Type <strong>DELETE</strong> to confirm.</p>
+            <input
+              type="text"
+              value={deleteConfirmationInput}
+              onChange={(event) => setDeleteConfirmationInput(event.target.value)}
+              className="profile-delete-confirm-input"
+              placeholder="DELETE"
+              autoComplete="off"
+              disabled={isDeletingAccount}
+            />
+            {deleteAccountError && <p className="auth-error-text">{deleteAccountError}</p>}
+            <div className="profile-delete-modal-actions">
+              <button type="button" className="profile-manage-btn" onClick={closeDeleteModal} disabled={isDeletingAccount}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="profile-delete-btn"
+                onClick={deleteAccount}
+                disabled={deleteConfirmationInput.trim().toUpperCase() !== 'DELETE' || isDeletingAccount}
+              >
+                {isDeletingAccount ? 'Deleting...' : 'Permanently Delete'}
+              </button>
+            </div>
+          </section>
+        </>
+      )}
+    </>
   )
 }
 
