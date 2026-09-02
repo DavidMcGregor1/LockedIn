@@ -1355,6 +1355,7 @@ function ComparePage({ users, activeUserId }) {
     referenceRows.flatMap((row) => Object.keys(row).filter((key) => key !== 'period')),
   )
   const visibleUsers = users.filter((user) => visibleUserNames.has(user.name))
+  const visibleUserIdsKey = visibleUsers.map((user) => user.id).join('|')
   const usersByName = visibleUsers.map((user) => ({
     ...user,
     color: palette[visibleUsers.indexOf(user) % palette.length],
@@ -1370,21 +1371,30 @@ function ComparePage({ users, activeUserId }) {
     Promise.all(
       visibleUsers.map((user) =>
         requestJson(`/api/users/${user.id}/goals`)
-          .then((goals) => [user.id, normalizeGoalValues(goals ?? defaultGoalValues)])
-          .catch(() => [user.id, { ...defaultGoalValues }]),
+          .then((goals) => ({ userId: user.id, goals: normalizeGoalValues(goals ?? defaultGoalValues), ok: true }))
+          .catch(() => ({ userId: user.id, goals: null, ok: false })),
       ),
     ).then((entries) => {
       if (cancelled) {
         return
       }
 
-      setUserGoalsById(Object.fromEntries(entries))
+      setUserGoalsById((current) => {
+        const updated = { ...current }
+        for (const entry of entries) {
+          if (entry.ok && entry.goals) {
+            updated[entry.userId] = entry.goals
+          }
+        }
+
+        return updated
+      })
     })
 
     return () => {
       cancelled = true
     }
-  }, [visibleUsers])
+  }, [visibleUserIdsKey])
 
   useEffect(() => {
     if (visibleUsers.length === 0) {
@@ -1398,9 +1408,9 @@ function ComparePage({ users, activeUserId }) {
         requestJson(`/api/dashboard/${user.id}`)
           .then((data) => {
             const summary = data?.summary ?? {}
-            return [
-              user.id,
-              {
+            return {
+              userId: user.id,
+              score: {
                 averageScore: summary.averageScore === null || summary.averageScore === undefined
                   ? null
                   : Number(summary.averageScore),
@@ -1408,30 +1418,32 @@ function ComparePage({ users, activeUserId }) {
                 calibrationDaysCompleted: Number(summary.calibrationDaysCompleted ?? 0),
                 calibrationDaysRequired: Number(summary.calibrationDaysRequired ?? 7),
               },
-            ]
+              ok: true,
+            }
           })
-          .catch(() => [
-            user.id,
-            {
-              averageScore: null,
-              isScoreCalibrated: false,
-              calibrationDaysCompleted: 0,
-              calibrationDaysRequired: 7,
-            },
-          ]),
+          .catch(() => ({ userId: user.id, score: null, ok: false })),
       ),
     ).then((entries) => {
       if (cancelled) {
         return
       }
 
-      setUserScoreById(Object.fromEntries(entries))
+      setUserScoreById((current) => {
+        const updated = { ...current }
+        for (const entry of entries) {
+          if (entry.ok && entry.score) {
+            updated[entry.userId] = entry.score
+          }
+        }
+
+        return updated
+      })
     })
 
     return () => {
       cancelled = true
     }
-  }, [visibleUsers])
+  }, [visibleUserIdsKey])
 
   const rankedUsers = usersByName
     .map((user) => {
