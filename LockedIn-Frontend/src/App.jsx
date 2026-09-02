@@ -1352,7 +1352,11 @@ function ComparePage({ users, activeUserId }) {
   const periods = referenceRows.map((row) => row.period)
   const palette = ['#62e47f', '#3d7cff', '#a65bff', '#f09a47', '#27b2a2']
   const visibleUserNames = new Set(
-    referenceRows.flatMap((row) => Object.keys(row).filter((key) => key !== 'period')),
+    selectedMetricKeys.flatMap((metricKey) =>
+      (compareByMetric[metricKey] ?? []).flatMap((row) =>
+        Object.keys(row).filter((key) => key !== 'period'),
+      ),
+    ),
   )
   const visibleUsers = users.filter((user) => visibleUserNames.has(user.name))
   const visibleUserIdsKey = visibleUsers.map((user) => user.id).join('|')
