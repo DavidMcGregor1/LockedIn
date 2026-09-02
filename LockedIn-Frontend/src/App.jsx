@@ -1291,7 +1291,6 @@ function ComparePage({ users, activeUserId }) {
   const [compareByMetric, setCompareByMetric] = useState({})
   const [userGoalsById, setUserGoalsById] = useState({})
   const [userScoreById, setUserScoreById] = useState({})
-  const [selectedPeerUserId, setSelectedPeerUserId] = useState('')
   const [isRangeMenuOpen, setIsRangeMenuOpen] = useState(false)
   const rangeMenuRef = useRef(null)
 
@@ -1365,28 +1364,6 @@ function ComparePage({ users, activeUserId }) {
     ...user,
     color: palette[visibleUsers.indexOf(user) % palette.length],
   }))
-
-  useEffect(() => {
-    const peerCandidates = visibleUsers
-      .filter((user) => user.id !== activeUserId)
-      .slice()
-      .sort((left, right) => {
-        const nameCompare = left.name.localeCompare(right.name)
-        if (nameCompare !== 0) {
-          return nameCompare
-        }
-
-        return Number(left.id) - Number(right.id)
-      })
-
-    setSelectedPeerUserId((current) => {
-      if (current && peerCandidates.some((user) => user.id === current)) {
-        return current
-      }
-
-      return peerCandidates[0]?.id ?? ''
-    })
-  }, [activeUserId, visibleUserIdsKey, visibleUsers])
 
   useEffect(() => {
     if (visibleUsers.length === 0) {
@@ -1544,14 +1521,9 @@ function ComparePage({ users, activeUserId }) {
     })
 
   const activeRankedUser = rankedUsers.find((user) => user.id === activeUserId)
-  const selectedPeerUser = selectedPeerUserId
-    ? rankedUsers.find((user) => user.id === selectedPeerUserId)
-    : null
   const topUsers = activeRankedUser
-    ? selectedPeerUser
-      ? [activeRankedUser, selectedPeerUser]
-      : [activeRankedUser]
-    : rankedUsers.slice(0, 2)
+    ? [activeRankedUser, ...rankedUsers.filter((user) => user.id !== activeUserId)]
+    : rankedUsers
 
   function getMetricUserStats(definition, user) {
     const rows = compareByMetric[definition.key] ?? []
@@ -1683,7 +1655,12 @@ function ComparePage({ users, activeUserId }) {
                 </div>
                 <h4>{definition.label}</h4>
               </div>
-              <div className="compare-metric-user-values">
+              <div
+                className="compare-metric-user-values"
+                style={{
+                  gridTemplateColumns: `repeat(${Math.max(1, topUsers.length)}, minmax(0, 1fr))`,
+                }}
+              >
                 {topUsers.map((user) => {
                   const stats = getMetricUserStats(definition, user)
                   return (
