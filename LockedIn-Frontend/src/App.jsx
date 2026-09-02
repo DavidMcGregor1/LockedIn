@@ -1291,6 +1291,7 @@ function ComparePage({ users, activeUserId }) {
   const [compareByMetric, setCompareByMetric] = useState({})
   const [userGoalsById, setUserGoalsById] = useState({})
   const [userScoreById, setUserScoreById] = useState({})
+  const [selectedPeerUserId, setSelectedPeerUserId] = useState('')
   const [isRangeMenuOpen, setIsRangeMenuOpen] = useState(false)
   const rangeMenuRef = useRef(null)
 
@@ -1364,6 +1365,28 @@ function ComparePage({ users, activeUserId }) {
     ...user,
     color: palette[visibleUsers.indexOf(user) % palette.length],
   }))
+
+  useEffect(() => {
+    const peerCandidates = visibleUsers
+      .filter((user) => user.id !== activeUserId)
+      .slice()
+      .sort((left, right) => {
+        const nameCompare = left.name.localeCompare(right.name)
+        if (nameCompare !== 0) {
+          return nameCompare
+        }
+
+        return Number(left.id) - Number(right.id)
+      })
+
+    setSelectedPeerUserId((current) => {
+      if (current && peerCandidates.some((user) => user.id === current)) {
+        return current
+      }
+
+      return peerCandidates[0]?.id ?? ''
+    })
+  }, [activeUserId, visibleUserIdsKey, visibleUsers])
 
   useEffect(() => {
     if (visibleUsers.length === 0) {
@@ -1521,8 +1544,13 @@ function ComparePage({ users, activeUserId }) {
     })
 
   const activeRankedUser = rankedUsers.find((user) => user.id === activeUserId)
+  const selectedPeerUser = selectedPeerUserId
+    ? rankedUsers.find((user) => user.id === selectedPeerUserId)
+    : null
   const topUsers = activeRankedUser
-    ? [activeRankedUser, ...rankedUsers.filter((user) => user.id !== activeUserId).slice(0, 1)]
+    ? selectedPeerUser
+      ? [activeRankedUser, selectedPeerUser]
+      : [activeRankedUser]
     : rankedUsers.slice(0, 2)
 
   function getMetricUserStats(definition, user) {
