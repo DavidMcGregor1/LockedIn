@@ -1475,9 +1475,39 @@ function ComparePage({ users, activeUserId }) {
         calibrationDaysRequired: scoreInfo.calibrationDaysRequired,
       }
     })
-    .sort((left, right) => (right.averageScore ?? -1) - (left.averageScore ?? -1))
+    .sort((left, right) => {
+      const rightScore = right.averageScore ?? -1
+      const leftScore = left.averageScore ?? -1
+      if (rightScore !== leftScore) {
+        return rightScore - leftScore
+      }
 
-  const topUsers = rankedUsers.slice(0, 2)
+      const rightCompleted = right.calibrationDaysCompleted ?? 0
+      const leftCompleted = left.calibrationDaysCompleted ?? 0
+      if (rightCompleted !== leftCompleted) {
+        return rightCompleted - leftCompleted
+      }
+
+      if (left.id === activeUserId && right.id !== activeUserId) {
+        return -1
+      }
+
+      if (right.id === activeUserId && left.id !== activeUserId) {
+        return 1
+      }
+
+      const nameCompare = left.name.localeCompare(right.name)
+      if (nameCompare !== 0) {
+        return nameCompare
+      }
+
+      return Number(left.id) - Number(right.id)
+    })
+
+  const activeRankedUser = rankedUsers.find((user) => user.id === activeUserId)
+  const topUsers = activeRankedUser
+    ? [activeRankedUser, ...rankedUsers.filter((user) => user.id !== activeUserId).slice(0, 1)]
+    : rankedUsers.slice(0, 2)
 
   function getMetricUserStats(definition, user) {
     const rows = compareByMetric[definition.key] ?? []
