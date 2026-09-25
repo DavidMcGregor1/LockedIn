@@ -145,8 +145,12 @@ function parseMetricInput(definition, inputValue) {
   return Math.round(parsed * multiplier) / multiplier
 }
 
-function sanitizeMetricDraft(inputValue) {
+function sanitizeMetricDraft(definition, inputValue) {
   const value = String(inputValue ?? '')
+  if (!definition.decimalPlaces) {
+    return value.replace(/[^\d]/g, '')
+  }
+
   const firstDecimalIndex = value.indexOf('.')
   if (firstDecimalIndex < 0) {
     return value.replace(/[^\d]/g, '')
@@ -947,7 +951,7 @@ function TodayPage({ activeUserId, activeUser, goals }) {
   )
 
   function updateMetric(definition, nextValue) {
-    const draftValue = sanitizeMetricDraft(nextValue)
+    const draftValue = sanitizeMetricDraft(definition, nextValue)
     const parsedValue = parseMetricInput(definition, draftValue)
     setMetricInputDrafts((current) => ({
       ...current,
