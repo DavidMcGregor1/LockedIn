@@ -12,6 +12,7 @@ const metricDefinitions = [
     goalLabel: 'Goal: 2 L',
     goalValue: 2,
     increment: 0.1,
+    decimalPlaces: 1,
     color: '#4f6fe8',
     unitLabel: 'L',
     displayValue: (value) => value.toFixed(1),
@@ -36,6 +37,7 @@ const metricDefinitions = [
     goalLabel: 'Goal: 8 hrs',
     goalValue: 8,
     increment: 0.1,
+    decimalPlaces: 1,
     color: '#8b5ce6',
     unitLabel: 'hrs',
     displayValue: (value) => value.toFixed(1),
@@ -59,7 +61,8 @@ const metricDefinitions = [
     label: 'Money Spent',
     goalLabel: 'Goal: under £20',
     goalValue: 20,
-    increment: 1,
+    increment: 0.01,
+    decimalPlaces: 2,
     color: '#f06f36',
     unitLabel: '',
     displayValue: (value) => `£${value.toFixed(0)}`,
@@ -124,8 +127,8 @@ function normalizeGoalValues(goalValues) {
 }
 
 function parseMetricInput(definition, inputValue) {
-  const cleaned = String(inputValue ?? '').replace(/[^\d.]/g, '')
-  if (!cleaned) {
+  const cleaned = String(inputValue ?? '').replace(/[^\d.]/g, '').replace(/\.(?=.*\.)/g, '')
+  if (!cleaned || cleaned === '.') {
     return 0
   }
 
@@ -134,11 +137,24 @@ function parseMetricInput(definition, inputValue) {
     return 0
   }
 
-  if (definition.increment >= 1) {
+  if (!definition.decimalPlaces) {
     return Math.round(parsed)
   }
 
-  return Math.round(parsed * 10) / 10
+  const multiplier = 10 ** definition.decimalPlaces
+  return Math.round(parsed * multiplier) / multiplier
+}
+
+function sanitizeMetricDraft(inputValue) {
+  const value = String(inputValue ?? '')
+  const firstDecimalIndex = value.indexOf('.')
+  if (firstDecimalIndex < 0) {
+    return value.replace(/[^\d]/g, '')
+  }
+
+  return `${value.slice(0, firstDecimalIndex).replace(/[^\d]/g, '')}.${value
+    .slice(firstDecimalIndex + 1)
+    .replace(/[^\d]/g, '')}`
 }
 
 function App() {
@@ -630,6 +646,7 @@ function PrivacyPage() {
 
 function TodayPage({ activeUserId, activeUser, goals }) {
   const [form, setForm] = useState(defaultTodayForm)
+  const [metricInputDrafts, setMetricInputDrafts] = useState({})
   const [selectedExercises, setSelectedExercises] = useState([])
   const [isExerciseSheetOpen, setIsExerciseSheetOpen] = useState(false)
   const [draftExercises, setDraftExercises] = useState([])
@@ -640,6 +657,15 @@ function TodayPage({ activeUserId, activeUser, goals }) {
     () => (activeUserId ? `lockedin-live-${activeUserId}` : ''),
     [activeUserId],
   )
+
+  function setTodayForm(nextForm) {
+    setForm(nextForm)
+    setMetricInputDrafts(
+      Object.fromEntries(
+        metricDefinitions.map((definition) => [definition.key, String(nextForm[definition.key] ?? 0)]),
+      ),
+    )
+  }
 
   function persistLiveDay(nextForm, nextSelectedExercises) {
     if (!activeUserId || !liveStorageKey) {
@@ -690,7 +716,7 @@ function TodayPage({ activeUserId, activeUser, goals }) {
         const parsed = JSON.parse(localDay)
         if (parsed.date === todayIso) {
           if (parsed.form) {
-            setForm({ ...defaultTodayForm, ...parsed.form })
+            setTodayForm({ ...defaultTodayForm, ...parsed.form })
           }
           setSelectedExercises(parsed.selectedExercises ?? [])
           setHasLoadedTodayState(true)
@@ -713,7 +739,7 @@ function TodayPage({ activeUserId, activeUser, goals }) {
             }
           : defaultTodayForm
 
-        setForm(nextForm)
+        setTodayForm(nextForm)
         setSelectedExercises([])
         localStorage.setItem(
           liveStorageKey,
@@ -726,7 +752,7 @@ function TodayPage({ activeUserId, activeUser, goals }) {
         setHasLoadedTodayState(true)
       })
       .catch(() => {
-        setForm(defaultTodayForm)
+        setTodayForm(defaultTodayForm)
         setSelectedExercises([])
         localStorage.setItem(
           liveStorageKey,
@@ -769,7 +795,7 @@ function TodayPage({ activeUserId, activeUser, goals }) {
       const delay = Math.max(1000, nextMidnight.getTime() - now.getTime())
 
       timerId = setTimeout(() => {
-        setForm(defaultTodayForm)
+        setTodayForm(defaultTodayForm)
         setSelectedExercises([])
         setDraftExercises([])
         setIsExerciseSheetOpen(false)
@@ -845,7 +871,7 @@ function TodayPage({ activeUserId, activeUser, goals }) {
     try {
       const parsed = JSON.parse(completed)
       if (parsed.form) {
-        setForm({ ...defaultTodayForm, ...parsed.form })
+        setTodayForm({ ...defaultTodayForm, ...parsed.form })
       }
       setSelectedExercises(parsed.selectedExercises ?? [])
       setIsDayCompleted(true)
@@ -890,11 +916,11 @@ function TodayPage({ activeUserId, activeUser, goals }) {
     try {
       const parsed = JSON.parse(localDay)
       if (parsed.date !== getTodayIsoDate()) {
-        setForm(defaultTodayForm)
+        setTodayForm(defaultTodayForm)
         setSelectedExercises([])
       }
     } catch {
-      setForm(defaultTodayForm)
+      setTodayForm(defaultTodayForm)
       setSelectedExercises([])
     }
   }, [activeUserId, liveStorageKey])
@@ -921,11 +947,16 @@ function TodayPage({ activeUserId, activeUser, goals }) {
   )
 
   function updateMetric(definition, nextValue) {
+    const draftValue = sanitizeMetricDraft(nextValue)
+    const parsedValue = parseMetricInput(definition, draftValue)
+    setMetricInputDrafts((current) => ({
+      ...current,
+      [definition.key]: draftValue,
+    }))
     setForm((current) => ({
       ...current,
-      [definition.key]: parseMetricInput(definition, nextValue),
+      [definition.key]: parsedValue,
     }))
-    const parsedValue = parseMetricInput(definition, nextValue)
     persistLiveDay(
       {
         ...form,
@@ -937,6 +968,13 @@ function TodayPage({ activeUserId, activeUser, goals }) {
       ...form,
       [definition.key]: parsedValue,
     })
+  }
+
+  function normalizeMetricDraft(definition) {
+    setMetricInputDrafts((current) => ({
+      ...current,
+      [definition.key]: String(parseMetricInput(definition, current[definition.key])),
+    }))
   }
 
   function saveCurrentDayProgress() {
@@ -1076,11 +1114,14 @@ function TodayPage({ activeUserId, activeUser, goals }) {
                           {definition.key === 'moneySpent' && <span className="money-prefix">£</span>}
                           <input
                             type="text"
-                            inputMode={definition.increment >= 1 ? 'numeric' : 'decimal'}
+                            inputMode={definition.decimalPlaces ? 'decimal' : 'numeric'}
                             autoComplete="off"
-                            value={value}
+                            value={metricInputDrafts[definition.key] ?? value}
                             onChange={(event) => updateMetric(definition, event.target.value)}
-                            onBlur={saveCurrentDayProgress}
+                            onBlur={() => {
+                              normalizeMetricDraft(definition)
+                              saveCurrentDayProgress()
+                            }}
                           />
                           {definition.unitLabel && <span className="habit-unit">{definition.unitLabel}</span>}
                         </label>
@@ -1792,7 +1833,7 @@ function formatGoalText(definition, goalValue) {
 }
 
 function formatMoney(value) {
-  return `£${Math.round(value)}`
+  return `£${Number(value).toFixed(2)}`
 }
 
 function GoalSettingsModal({ initialGoals, isRequired, isSaving, error, onClose, onSave }) {
