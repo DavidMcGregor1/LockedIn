@@ -5,5 +5,8 @@
   "MYSQL_USERNAME": "a4b54e_locked",
   "MYSQL_PASSWORD": "REPLACE_WITH_PASSWORD",
   "MYSQL_SSLMODE": "Preferred",
-  "CORS_ORIGINS": "https://lockedin-68fm.onrender.com"
+  "CORS_ORIGINS": "https://lockedin-68fm.onrender.com",
+  "TWILIO_ACCOUNT_SID": "REPLACE_WITH_TWILIO_ACCOUNT_SID",
+  "TWILIO_AUTH_TOKEN": "REPLACE_WITH_TWILIO_AUTH_TOKEN",
+  "TWILIO_FROM_NUMBER": "+440000000000"
 }

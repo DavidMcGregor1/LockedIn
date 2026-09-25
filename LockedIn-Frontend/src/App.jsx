@@ -1863,6 +1863,10 @@ function AccountPage({ activeUser, goals, onManageGoals, onSignOut, onDeleteAcco
   const [joinedRoomCode, setJoinedRoomCode] = useState('')
   const [roomError, setRoomError] = useState('')
   const [isSavingRoom, setIsSavingRoom] = useState(false)
+  const [phoneNumberInput, setPhoneNumberInput] = useState(activeUser?.phoneNumber ?? '')
+  const [phoneError, setPhoneError] = useState('')
+  const [phoneMessage, setPhoneMessage] = useState('')
+  const [isSavingPhone, setIsSavingPhone] = useState(false)
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [deleteConfirmationInput, setDeleteConfirmationInput] = useState('')
   const [isDeletingAccount, setIsDeletingAccount] = useState(false)
@@ -1898,10 +1902,28 @@ function AccountPage({ activeUser, goals, onManageGoals, onSignOut, onDeleteAcco
         setRoomCodeInput('')
       })
 
+    requestJson(`/api/users/${userId}/phone`)
+      .then((data) => {
+        if (!cancelled) {
+          setPhoneNumberInput(data?.phoneNumber ?? '')
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPhoneNumberInput('')
+        }
+      })
+
     return () => {
       cancelled = true
     }
   }, [userId])
+
+  useEffect(() => {
+    setPhoneNumberInput(activeUser?.phoneNumber ?? '')
+    setPhoneError('')
+    setPhoneMessage('')
+  }, [activeUser?.phoneNumber, userId])
 
   if (!activeUser) {
     return <section className="page-card">Loading profile...</section>
@@ -1952,6 +1974,32 @@ function AccountPage({ activeUser, goals, onManageGoals, onSignOut, onDeleteAcco
       setRoomError('Could not leave room right now.')
     } finally {
       setIsSavingRoom(false)
+    }
+
+  }
+
+  async function submitPhoneNumber(event) {
+    event.preventDefault()
+    setPhoneError('')
+    setPhoneMessage('')
+    setIsSavingPhone(true)
+
+    try {
+      const data = await requestJson(`/api/users/${userId}/phone`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phoneNumber: phoneNumberInput.trim() }),
+      })
+      setPhoneNumberInput(data?.phoneNumber ?? '')
+      setPhoneMessage(data?.phoneNumber ? 'Number saved. Check your phone for the confirmation text.' : 'Phone reminders turned off.')
+    } catch (errorToHandle) {
+      setPhoneError(
+        errorToHandle instanceof Error && errorToHandle.message.includes('international format')
+          ? 'Use international format, for example +447700900123.'
+          : 'Could not save your phone number right now.',
+      )
+    } finally {
+      setIsSavingPhone(false)
     }
   }
 
@@ -2091,6 +2139,35 @@ function AccountPage({ activeUser, goals, onManageGoals, onSignOut, onDeleteAcco
               </button>
             </p>
           )}
+        </article>
+
+        <article className="profile-room-card">
+          <div className="profile-card-title-row">
+            <h3>Daily SMS Reminder</h3>
+          </div>
+          <p className="profile-room-help">
+            Add your phone number to receive a reminder at 9:00 PM UK time each day.
+          </p>
+          <form className="profile-room-form" onSubmit={submitPhoneNumber}>
+            <input
+              type="tel"
+              value={phoneNumberInput}
+              onChange={(event) => setPhoneNumberInput(event.target.value)}
+              placeholder="+447700900123"
+              maxLength={20}
+              className="profile-room-input profile-phone-input"
+              autoComplete="tel"
+            />
+            <button
+              type="submit"
+              className="profile-room-submit-btn"
+              disabled={isSavingPhone}
+            >
+              {isSavingPhone ? 'Saving...' : 'Save'}
+            </button>
+          </form>
+          {phoneError && <p className="auth-error-text">{phoneError}</p>}
+          {phoneMessage && <p className="profile-phone-message">{phoneMessage}</p>}
         </article>
 
         <article className="profile-link-card">

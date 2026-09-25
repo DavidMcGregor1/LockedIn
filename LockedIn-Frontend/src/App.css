@@ -1712,6 +1712,10 @@ body,
   text-transform: none;
 }
 
+.profile-phone-input {
+  text-transform: none;
+}
+
 .profile-room-submit-btn {
   border: 1px solid #4ea86a;
   border-radius: 8px;
@@ -1734,6 +1738,12 @@ body,
 
 .profile-room-current strong {
   color: #d9e3f3;
+}
+
+.profile-phone-message {
+  margin: 8px 0 0;
+  color: #62e47f;
+  font-size: 0.78rem;
 }
 
 .profile-room-remove-btn {

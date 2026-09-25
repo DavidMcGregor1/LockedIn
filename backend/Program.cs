@@ -32,6 +32,9 @@ var configuredCorsOrigins = (builder.Configuration["CORS_ORIGINS"] ?? defaultCor
     .ToArray();
 
 builder.Services.AddOpenApi();
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<LockedInSmsService>();
+builder.Services.AddHostedService<ProgressReminderSchedulerHostedService>();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(
@@ -57,6 +60,84 @@ var metricKeys = new HashSet<string>
     "moneySpent",
 };
 var dbConnectionString = builder.Configuration.GetConnectionString("MySql");
+if (!string.IsNullOrWhiteSpace(dbConnectionString))
+{
+    try
+    {
+        await EnsureProgressReminderSchemaAsync(dbConnectionString);
+    }
+    catch (MySqlException ex)
+    {
+        app.Logger.LogError(ex, "Could not ensure progress reminder database schema.");
+    }
+}
+
+app.MapPut("/api/users/{userId}/phone", async (string userId, SavePhoneNumberRequest request) =>
+{
+    if (string.IsNullOrWhiteSpace(dbConnectionString))
+    {
+        return Results.Problem("Database connection is not configured.");
+    }
+
+    if (!long.TryParse(userId, out var userIdValue))
+    {
+        return Results.BadRequest(new { error = "Invalid userId." });
+    }
+
+    var phoneNumber = NormalizePhoneNumber(request.PhoneNumber);
+    if (!string.IsNullOrWhiteSpace(phoneNumber) && !IsValidPhoneNumber(phoneNumber))
+    {
+        return Results.BadRequest(new { error = "Phone number must use international format, for example +447700900123." });
+    }
+
+    if (!await UserExistsAsync(dbConnectionString, userIdValue))
+    {
+        return Results.NotFound();
+    }
+
+    await UpdateUserPhoneNumberAsync(dbConnectionString, userIdValue, phoneNumber);
+    if (phoneNumber is null)
+    {
+        return Results.Ok(new { phoneNumber = (string?)null });
+    }
+
+    try
+    {
+        var smsService = app.Services.GetRequiredService<LockedInSmsService>();
+        await smsService.SendAsync(
+            phoneNumber,
+            "Locked In: we've got your number saved. We'll remind you at 9:00 PM UK time to log your progress.",
+            CancellationToken.None);
+        return Results.Ok(new { phoneNumber });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(
+            title: "Phone number saved, but confirmation SMS could not be sent.",
+            detail: ex.Message,
+            statusCode: StatusCodes.Status502BadGateway);
+    }
+});
+
+app.MapGet("/api/users/{userId}/phone", async (string userId) =>
+{
+    if (string.IsNullOrWhiteSpace(dbConnectionString))
+    {
+        return Results.Problem("Database connection is not configured.");
+    }
+
+    if (!long.TryParse(userId, out var userIdValue))
+    {
+        return Results.BadRequest(new { error = "Invalid userId." });
+    }
+
+    if (!await UserExistsAsync(dbConnectionString, userIdValue))
+    {
+        return Results.NotFound();
+    }
+
+    return Results.Ok(new { phoneNumber = await LoadUserPhoneNumberAsync(dbConnectionString, userIdValue) });
+});
 
 app.MapPost("/api/auth/signup", async (SignupRequest request) =>
 {
@@ -582,15 +663,15 @@ static string? BuildMySqlConnectionString(IConfiguration configuration)
     return $"Server={mysqlHost};Port={mysqlPort};Database={mysqlDatabase};User ID={mysqlUsername};Password={mysqlPassword};SslMode={mysqlSslMode};AllowPublicKeyRetrieval=True;TreatTinyAsBoolean=True;";
 }
 
-static async Task<List<AppUser>> LoadUsersAsync(string connectionString)
+static async Task<List<AppUser>> LoadUsersAsync(string connectionString, bool includePhoneNumber = false)
 {
-    var users = new List<(long Id, string Username)>();
+    var users = new List<(long Id, string Username, string? PhoneNumber)>();
     await using (var connection = new MySqlConnection(connectionString))
     {
         await connection.OpenAsync();
         await using var command = new MySqlCommand(
             """
-            SELECT id, username
+            SELECT id, username, phone_number
             FROM users
             ORDER BY id;
             """,
@@ -599,7 +680,10 @@ static async Task<List<AppUser>> LoadUsersAsync(string connectionString)
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
-            users.Add((reader.GetInt64("id"), reader.GetString("username")));
+            users.Add((
+                reader.GetInt64("id"),
+                reader.GetString("username"),
+                reader.IsDBNull(reader.GetOrdinal("phone_number")) ? null : reader.GetString("phone_number")));
         }
 
     }
@@ -614,7 +698,8 @@ static async Task<List<AppUser>> LoadUsersAsync(string connectionString)
                 user.Id.ToString(CultureInfo.InvariantCulture),
                 user.Username,
                 CalculateCurrentStreak(dates ?? []),
-                DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd"));
+                DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd"),
+                includePhoneNumber ? user.PhoneNumber : null);
         })
         .ToList();
 }
@@ -864,7 +949,7 @@ static async Task<AppUser?> LoadUserByIdAsync(string connectionString, long user
     await connection.OpenAsync();
     await using var command = new MySqlCommand(
         """
-        SELECT id, username
+        SELECT id, username, phone_number
         FROM users
         WHERE id = @userId
         LIMIT 1;
@@ -879,6 +964,7 @@ static async Task<AppUser?> LoadUserByIdAsync(string connectionString, long user
     }
 
     var username = reader.GetString("username");
+    var phoneNumber = reader.IsDBNull(reader.GetOrdinal("phone_number")) ? null : reader.GetString("phone_number");
     await reader.CloseAsync();
 
     var entries = await LoadEntriesForUserAsync(connectionString, userId);
@@ -887,7 +973,8 @@ static async Task<AppUser?> LoadUserByIdAsync(string connectionString, long user
         userId.ToString(CultureInfo.InvariantCulture),
         username,
         CalculateCurrentStreak(userDays),
-        DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd"));
+        DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd"),
+        phoneNumber);
 }
 
 static async Task<bool> UserExistsAsync(string connectionString, long userId)
@@ -898,6 +985,102 @@ static async Task<bool> UserExistsAsync(string connectionString, long userId)
     command.Parameters.AddWithValue("@userId", userId);
     var result = await command.ExecuteScalarAsync();
     return result is not null;
+}
+
+static async Task UpdateUserPhoneNumberAsync(string connectionString, long userId, string? phoneNumber)
+{
+    await using var connection = new MySqlConnection(connectionString);
+    await connection.OpenAsync();
+    await using var command = new MySqlCommand(
+        """
+        UPDATE users
+        SET phone_number = @phoneNumber
+        WHERE id = @userId;
+        """,
+        connection);
+    command.Parameters.AddWithValue("@phoneNumber", phoneNumber is null ? DBNull.Value : phoneNumber);
+    command.Parameters.AddWithValue("@userId", userId);
+    await command.ExecuteNonQueryAsync();
+}
+
+static async Task<string?> LoadUserPhoneNumberAsync(string connectionString, long userId)
+{
+    await using var connection = new MySqlConnection(connectionString);
+    await connection.OpenAsync();
+    await using var command = new MySqlCommand(
+        """
+        SELECT phone_number
+        FROM users
+        WHERE id = @userId
+        LIMIT 1;
+        """,
+        connection);
+    command.Parameters.AddWithValue("@userId", userId);
+    var result = await command.ExecuteScalarAsync();
+    return result is null or DBNull ? null : result.ToString();
+}
+
+static async Task EnsureProgressReminderSchemaAsync(string connectionString)
+{
+    await using var connection = new MySqlConnection(connectionString);
+    await connection.OpenAsync();
+
+    await using var columnCheck = new MySqlCommand(
+        """
+        SELECT COUNT(*)
+        FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'users'
+          AND column_name = 'phone_number';
+        """,
+        connection);
+    var phoneColumnExists = Convert.ToInt32(await columnCheck.ExecuteScalarAsync(), CultureInfo.InvariantCulture) > 0;
+    if (!phoneColumnExists)
+    {
+        await using var addColumn = new MySqlCommand(
+            "ALTER TABLE users ADD COLUMN phone_number VARCHAR(32) NULL;",
+            connection);
+        await addColumn.ExecuteNonQueryAsync();
+    }
+
+    await using var table = new MySqlCommand(
+        """
+        CREATE TABLE IF NOT EXISTS progress_reminder_sms (
+            id BIGINT NOT NULL AUTO_INCREMENT,
+            user_id BIGINT NOT NULL,
+            reminder_date DATE NOT NULL,
+            status VARCHAR(16) NOT NULL DEFAULT 'pending',
+            attempts INT NOT NULL DEFAULT 0,
+            sent_at DATETIME NULL,
+            last_error TEXT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uq_progress_reminder_sms_user_date (user_id, reminder_date),
+            KEY ix_progress_reminder_sms_date (reminder_date)
+        );
+        """,
+        connection);
+    await table.ExecuteNonQueryAsync();
+}
+
+static string? NormalizePhoneNumber(string? phoneNumber)
+{
+    if (string.IsNullOrWhiteSpace(phoneNumber))
+    {
+        return null;
+    }
+
+    return new string(phoneNumber.Trim()
+        .Where(character => !char.IsWhiteSpace(character) && character is not '(' and not ')' and not '-')
+        .ToArray());
+}
+
+static bool IsValidPhoneNumber(string phoneNumber)
+{
+    return phoneNumber.StartsWith('+') &&
+           phoneNumber.Length is >= 9 and <= 16 &&
+           phoneNumber[1..].All(char.IsDigit);
 }
 
 static async Task<UserGoals?> LoadUserGoalsAsync(string connectionString, long userId)
@@ -1379,6 +1562,7 @@ static async Task DeleteUserAccountAsync(string connectionString, long userId)
     await DeleteUserDataIfTableExistsAsync(connection, transaction, "daily_entries", userId);
     await DeleteUserDataIfTableExistsAsync(connection, transaction, "user_goals", userId);
     await DeleteUserDataIfTableExistsAsync(connection, transaction, "user_rooms", userId);
+    await DeleteUserDataIfTableExistsAsync(connection, transaction, "progress_reminder_sms", userId);
 
     await using (var deleteUserCommand = new MySqlCommand(
         """
@@ -1851,11 +2035,12 @@ static decimal GetMetric(DailyEntry entry, string metric)
     };
 }
 
-record AppUser(string Id, string Name, int StreakDays, string JoinDate);
+record AppUser(string Id, string Name, int StreakDays, string JoinDate, string? PhoneNumber);
 
 record SignupRequest(string Username, string Password, string? DisplayName);
 record LoginRequest(string Username, string Password);
 record SaveUserRoomRequest(string RoomCode);
+record SavePhoneNumberRequest(string? PhoneNumber);
 record UserGoals(decimal WaterLiters, int ExerciseMinutes, decimal SleepHours, int Steps, decimal MoneySpent);
 record GoalMetricNames(string Water, string Exercise, string Sleep, string Steps, string Money);
 
