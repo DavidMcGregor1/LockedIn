@@ -87,7 +87,7 @@ app.MapPut("/api/users/{userId}/phone", async (string userId, SavePhoneNumberReq
     var phoneNumber = NormalizePhoneNumber(request.PhoneNumber);
     if (!string.IsNullOrWhiteSpace(phoneNumber) && !IsValidPhoneNumber(phoneNumber))
     {
-        return Results.BadRequest(new { error = "Phone number must use international format, for example +447700900123." });
+        return Results.BadRequest(new { error = "Enter a UK mobile number as 07... or +44..., for example 07700900123." });
     }
 
     if (!await UserExistsAsync(dbConnectionString, userIdValue))
@@ -1071,9 +1071,18 @@ static string? NormalizePhoneNumber(string? phoneNumber)
         return null;
     }
 
-    return new string(phoneNumber.Trim()
+    var normalized = new string(phoneNumber.Trim()
         .Where(character => !char.IsWhiteSpace(character) && character is not '(' and not ')' and not '-')
         .ToArray());
+
+    if (normalized.StartsWith("07", StringComparison.Ordinal) &&
+        normalized.Length == 11 &&
+        normalized.All(char.IsDigit))
+    {
+        return $"+44{normalized[1..]}";
+    }
+
+    return normalized;
 }
 
 static bool IsValidPhoneNumber(string phoneNumber)

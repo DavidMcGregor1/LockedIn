@@ -1994,8 +1994,8 @@ function AccountPage({ activeUser, goals, onManageGoals, onSignOut, onDeleteAcco
       setPhoneMessage(data?.phoneNumber ? 'Number saved. Check your phone for the confirmation text.' : 'Phone reminders turned off.')
     } catch (errorToHandle) {
       setPhoneError(
-        errorToHandle instanceof Error && errorToHandle.message.includes('international format')
-          ? 'Use international format, for example +447700900123.'
+        errorToHandle instanceof Error && errorToHandle.message.includes('UK mobile number')
+          ? 'Use a UK mobile number such as 07700900123 or +447700900123.'
           : 'Could not save your phone number right now.',
       )
     } finally {
@@ -2146,14 +2146,14 @@ function AccountPage({ activeUser, goals, onManageGoals, onSignOut, onDeleteAcco
             <h3>Daily SMS Reminder</h3>
           </div>
           <p className="profile-room-help">
-            Add your phone number to receive a reminder at 9:00 PM UK time each day.
+            Add your UK mobile number (07... or +44...) to receive a reminder at 9:00 PM UK time each day.
           </p>
           <form className="profile-room-form" onSubmit={submitPhoneNumber}>
             <input
               type="tel"
               value={phoneNumberInput}
               onChange={(event) => setPhoneNumberInput(event.target.value)}
-              placeholder="+447700900123"
+              placeholder="07700900123"
               maxLength={20}
               className="profile-room-input profile-phone-input"
               autoComplete="tel"
